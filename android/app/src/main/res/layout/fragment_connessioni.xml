@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/vespera_bg"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/bg_section_panel"
+        android:padding="12dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/tab_connessioni"
+            android:textColor="@color/vespera_title"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/editDeviceIp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="@string/hint_device_ip"
+            android:inputType="text"
+            android:textColor="@color/vespera_text"
+            android:textColorHint="@color/vespera_muted" />
+
+        <EditText
+            android:id="@+id/editAdbPort"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/hint_adb_port"
+            android:inputType="number"
+            android:text="5555"
+            android:textColor="@color/vespera_text"
+            android:textColorHint="@color/vespera_muted" />
+
+        <EditText
+            android:id="@+id/editAdbPath"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/adb_path_hint"
+            android:inputType="text"
+            android:textColor="@color/vespera_text"
+            android:textColorHint="@color/vespera_muted" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="12dp">
+
+            <Button
+                android:id="@+id/btnConnect"
+                style="@style/Widget.Vespera.Button.Primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/btn_connect" />
+
+            <Button
+                android:id="@+id/btnDisconnect"
+                style="@style/Widget.Vespera.Button.Danger"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="@string/btn_disconnect" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnRefreshStatus"
+            style="@style/Widget.Vespera.Button.Slate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/btn_refresh_status" />
+
+        <Button
+            android:id="@+id/btnPingBridge"
+            style="@style/Widget.Vespera.Button.Slate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/btn_ping_bridge" />
+
+        <Button
+            android:id="@+id/btnWifiConnect"
+            style="@style/Widget.Vespera.Button.Primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/btn_wifi_connect" />
+
+        <Button
+            android:id="@+id/btnWifiDisconnect"
+            style="@style/Widget.Vespera.Button.Danger"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/btn_wifi_disconnect" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/label_status"
+            android:textColor="@color/vespera_title"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/textStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:fontFamily="monospace"
+            android:text="—"
+            android:textColor="@color/vespera_text_secondary" />
+    </LinearLayout>
+</ScrollView>

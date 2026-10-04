@@ -1,0 +1,73 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.vaonis.vesperacontrol'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.vaonis.vesperacontrol"
+        minSdk 29
+        targetSdk 35
+        versionCode 3
+        versionName "0.2.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        viewBinding true
+        buildConfig true
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.2.0'
+    implementation 'androidx.viewpager2:viewpager2:1.1.0'
+    implementation 'androidx.fragment:fragment:1.8.5'
+    implementation 'commons-net:commons-net:3.11.1'
+}
+
+def apkShareDir = file('C:/WORK/ESA/Share')
+
+tasks.register('publishDebugApkToShare', Copy) {
+    from(layout.buildDirectory.file('outputs/apk/debug/app-debug.apk'))
+    into(apkShareDir)
+    rename { 'VesperaControl.apk' }
+    doFirst {
+        apkShareDir.mkdirs()
+    }
+    def publishedVersion = android.defaultConfig.versionName
+    def publishedCode = android.defaultConfig.versionCode
+    doLast {
+        def manifest = new File(apkShareDir, 'vesperacontrol-version.json')
+        manifest.setText("""\
+{
+  "name": "VesperaControl",
+  "version": "${publishedVersion}",
+  "versionCode": ${publishedCode},
+  "apk": "VesperaControl.apk",
+  "source": "mega"
+}
+""", 'UTF-8')
+    }
+}
+
+afterEvaluate {
+    tasks.named('assembleDebug').configure {
+        finalizedBy 'publishDebugApkToShare'
+    }
+}

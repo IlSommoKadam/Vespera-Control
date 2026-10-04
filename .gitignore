@@ -1,0 +1,21 @@
+# Android / Gradle
+**/.gradle/
+**/build/
+**/local.properties
+**/*.apk
+**/*.aab
+**/*.iml
+**/.idea/
+**/captures/
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/venv/
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+*.lnk
+.DS_Store

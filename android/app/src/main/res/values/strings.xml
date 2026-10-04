@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Vespera Control</string>
+    <!-- Stessa cartella pubblica di ESA Meter / StarStacKadam. Legge vesperacontrol-version.json. -->
+    <string name="mega_version_url" translatable="false">https://mega.nz/folder/HswU1QqC#862Zb92yZ0Upn1PXgW5EKA</string>
+
+    <string name="tab_connessioni">Connessioni</string>
+    <string name="tab_foto">Foto / Hard Disk</string>
+    <string name="tab_telescopio">Telescopio</string>
+    <string name="tab_sistema">Sistema</string>
+    <string name="tab_notifiche">Notifiche</string>
+    <string name="tab_anteprima">Anteprima</string>
+    <string name="tab_schermo">Schermo Pi</string>
+
+    <string name="btn_connect">Connetti</string>
+    <string name="btn_disconnect">Disconnetti</string>
+    <string name="btn_refresh_status">Aggiorna stato</string>
+    <string name="btn_park">Park</string>
+    <string name="btn_unpark">Init</string>
+    <string name="btn_mount_hd">Monta HD</string>
+    <string name="btn_unmount_hd">Spegni HD</string>
+    <string name="btn_goto">Riprendi</string>
+    <string name="btn_abort">Stop</string>
+    <string name="btn_take_photo">Elenco dischi</string>
+    <string name="btn_start_obs">Monta HD</string>
+    <string name="btn_stop_obs">Sincronizza ora</string>
+    <string name="btn_reboot">Riavvia Singularity</string>
+    <string name="btn_wifi_connect">Connetti Wi‑Fi Vespera</string>
+    <string name="btn_wifi_disconnect">Disconnetti Wi‑Fi</string>
+    <string name="btn_ping_bridge">Ping RemoteBridge</string>
+    <string name="btn_open_mirror">Apri mirror</string>
+    <string name="btn_ftp_connect">Connetti FTP</string>
+    <string name="btn_ftp_refresh">Aggiorna lista</string>
+
+    <string name="hint_device_ip">IP device (es. 192.168.1.50)</string>
+    <string name="hint_adb_port">Porta ADB (es. 5555)</string>
+    <string name="hint_scrcpy_port">Porta scrcpy (es. 27183)</string>
+    <string name="hint_bitrate">Bitrate (Mbps)</string>
+    <string name="hint_ftp_host">Host FTP</string>
+    <string name="hint_ftp_port">Porta FTP (2121 / 2122)</string>
+
+    <string name="label_status">Stato</string>
+    <string name="label_preview">Anteprima</string>
+    <string name="label_file_list">File remoti</string>
+    <string name="placeholder_no_preview">Nessuna anteprima</string>
+    <string name="placeholder_notifications">Nessuna notifica (stub)</string>
+    <string name="adb_path_hint">Path adb configurabile (assets/adb o percorso assoluto)</string>
+</resources>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Palette speculare a VesperaHelper / UiStyle -->
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <color name="vespera_bg">#FFE8EEF4</color>
+    <color name="vespera_surface">#FFF3F7FA</color>
+    <color name="vespera_panel_stroke">#FF90A4AE</color>
+    <color name="vespera_accent">#FF1C6E8C</color>
+    <color name="vespera_title">#FF1A237E</color>
+    <color name="vespera_text">#FF212121</color>
+    <color name="vespera_text_secondary">#FF263238</color>
+    <color name="vespera_muted">#FF546E7A</color>
+
+    <color name="vespera_slate">#FF4A6F86</color>
+    <color name="vespera_slate_muted">#FF7A8B96</color>
+    <color name="vespera_green">#FF3B7F55</color>
+    <color name="vespera_amber">#FFC9A227</color>
+    <color name="vespera_terracotta">#FFC0724A</color>
+    <color name="vespera_rose">#FFB05757</color>
+    <color name="vespera_steel">#FF8A97A3</color>
+    <color name="vespera_steel_blue">#FF5A7A92</color>
+    <color name="vespera_ink">#FF2A2D31</color>
+
+    <color name="vespera_tab_well">#FF9AA9B5</color>
+    <color name="vespera_tab_idle">#FFF4F7FA</color>
+    <color name="vespera_tab_idle_text">#FF263238</color>
+    <color name="vespera_tab_divider">#FF6D7D88</color>
+    <color name="vespera_header_divider">#FF90A4AE</color>
+</resources>
