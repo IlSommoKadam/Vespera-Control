@@ -1,47 +1,46 @@
 package com.vaonis.vesperacontrol.ui.schermo;
 
 import android.os.Bundle;
+import android.view.View;
 import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import com.vaonis.vesperacontrol.R;
 
-/**
- * Activity stub "Apri mirror".
- *
- * TODO integrazione:
- * 1. Includere il modulo scrcpy dal fork Scrcpy-for-Android
- *    (package org.client.scrcpy) senza copiare l'intero tree nel progetto.
- * 2. Avviare qui la superficie/client scrcpy con IP / porta / bitrate.
- *
- * Intent commentato di esempio:
- * <pre>
- * // Intent scrcpy = new Intent();
- * // scrcpy.setClassName(this, "org.client.scrcpy.Main");
- * // scrcpy.putExtra("server_ip", ip);
- * // scrcpy.putExtra("server_port", port);
- * // scrcpy.putExtra("video_bitrate", bitrateMbps * 1_000_000);
- * // startActivity(scrcpy);
- * </pre>
- */
+/** Fallback se Scrcpy-for-Android non è installato. */
 public class ScreenMirrorActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_screen_mirror);
+        View root = findViewById(R.id.root);
+        final int basePad = Math.round(24f * getResources().getDisplayMetrics().density);
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, windowInsets) -> {
+            Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(
+                    bars.left + basePad,
+                    bars.top + basePad,
+                    bars.right + basePad,
+                    bars.bottom + basePad
+            );
+            return windowInsets;
+        });
 
         String ip = getIntent().getStringExtra(SchermoFragment.EXTRA_IP);
         String port = getIntent().getStringExtra(SchermoFragment.EXTRA_PORT);
         String bitrate = getIntent().getStringExtra(SchermoFragment.EXTRA_BITRATE);
 
         TextView params = findViewById(R.id.textMirrorParams);
-        params.setText("IP=" + nullToDash(ip)
-                + "\nPorta=" + nullToDash(port)
-                + "\nBitrate=" + nullToDash(bitrate) + " Mbps"
-                + "\n\n(stub — nessun mirror attivo)");
+        params.setText(getString(R.string.scrcpy_fallback_params,
+                nullToDash(ip), nullToDash(port), nullToDash(bitrate)));
     }
 
     private static String nullToDash(String v) {

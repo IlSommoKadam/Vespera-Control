@@ -4,26 +4,30 @@ import android.content.Context;
 import android.text.TextUtils;
 import android.util.Log;
 
+import com.vaonis.vesperacontrol.DevicePrefs;
+
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 /**
- * Ponte ADB verso Vespera Helper (RemoteBridge).
+ * Ponte verso Vespera Helper (RemoteBridge) via ADB sulla porta TCP del Pi.
  * Path remoti sotto:
  * /sdcard/Android/data/com.vaonis.vesperahelper/files/
  *
- * Il binario adb può essere:
- * - un path assoluto configurabile
- * - oppure un placeholder in assets/adb/ (da estrarre a filesDir)
+ * Come il client Windows (che fa "adb connect" prima di ogni comando), ogni operazione
+ * riapre da sola la connessione se è caduta (Wi-Fi in risparmio energetico, cambio rete,
+ * socket chiuso dal Pi, timeout): l'utente non deve più premere Connetti dopo un cambio tab.
  */
 public final class AdbBridge {
 
@@ -34,62 +38,99 @@ public final class AdbBridge {
     public static final String REMOTE_ACK = REMOTE_FILES_DIR + "remote.ack";
 
     private static final String TAG = "AdbBridge";
-    private static final String ASSETS_ADB_PLACEHOLDER = "adb/README.txt";
 
     public interface ResultCallback {
         void onResult(boolean ok, String message);
     }
 
+    /** Notifica connessione aperta/chiusa (chiamata dal thread ADB). */
+    public interface StateListener {
+        void onAdbState(boolean linked, String target, String message);
+    }
+
+    private interface Op<T> {
+        T run(AdbClient c) throws IOException;
+    }
+
     private final Context appContext;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final CopyOnWriteArrayList<StateListener> listeners = new CopyOnWriteArrayList<>();
 
-    private String adbPath;
-    private String deviceSerial; // host:port dopo connect
+    private AdbClient client;
+    private AdbKeys keys;
+    private volatile String deviceSerial;
+    private volatile String lastHost;
+    private volatile int lastPort;
+    private volatile boolean manualDisconnect;
 
     public AdbBridge(Context context) {
         this.appContext = context.getApplicationContext();
-        this.adbPath = resolveDefaultAdbPath();
     }
 
+    /** Il telefono non usa un binario adb: la connessione è TCP verso il Pi. */
     public void setAdbPath(String path) {
-        if (!TextUtils.isEmpty(path)) {
-            this.adbPath = path.trim();
-        }
     }
 
     public String getAdbPath() {
-        return adbPath;
+        return "";
     }
 
     public String getDeviceSerial() {
         return deviceSerial;
     }
 
-    /** connect host:port via adb connect */
+    public void addStateListener(StateListener l) {
+        if (l != null) listeners.addIfAbsent(l);
+    }
+
+    public void removeStateListener(StateListener l) {
+        listeners.remove(l);
+    }
+
+    /**
+     * Vero se si possono inviare comandi: connessione aperta oppure Pi noto
+     * (riconnessione automatica alla prossima operazione).
+     */
+    public boolean isConnected() {
+        return ready() || (!manualDisconnect && !TextUtils.isEmpty(targetHost()));
+    }
+
+    /** Vero solo se il socket ADB è aperto adesso. */
+    public boolean isLinked() {
+        return ready();
+    }
+
     public void connect(String host, int port, ResultCallback callback) {
         executor.execute(() -> {
-            String serial = host + ":" + port;
-            ExecResult result = runAdb("connect", serial);
-            boolean ok = result.exitCode == 0
-                    && (result.stdout.toLowerCase().contains("connected")
-                    || result.stdout.toLowerCase().contains("already"));
-            if (ok) {
-                deviceSerial = serial;
+            manualDisconnect = false;
+            lastHost = host;
+            lastPort = port;
+            try {
+                openClient(host, port);
+                deliver(callback, true, "Connesso a " + host + ":" + port);
+            } catch (Exception e) {
+                deliver(callback, false, connectError(host, port, e));
             }
-            deliver(callback, ok, result.combined());
         });
     }
 
     public void disconnect(ResultCallback callback) {
         executor.execute(() -> {
-            ExecResult result;
-            if (!TextUtils.isEmpty(deviceSerial)) {
-                result = runAdb("disconnect", deviceSerial);
-            } else {
-                result = runAdb("disconnect");
+            manualDisconnect = true;
+            closeClient("Disconnesso");
+            deliver(callback, true, "Disconnesso");
+        });
+    }
+
+    /** Riapre la connessione in background se è caduta (es. app tornata in primo piano). */
+    public void ensureConnectedAsync(ResultCallback callback) {
+        executor.execute(() -> {
+            try {
+                live();
+                deliver(callback, true, deviceSerial);
+            } catch (IOException e) {
+                deliver(callback, false, e.getMessage());
             }
-            deviceSerial = null;
-            deliver(callback, result.exitCode == 0, result.combined());
         });
     }
 
@@ -98,58 +139,76 @@ public final class AdbBridge {
      * (es. {@code cmd|telescope|park}) e prova a leggere remote.ack.
      */
     public void sendCommand(String line, ResultCallback callback) {
+        sendCommand(line, 14_000L, callback);
+    }
+
+    /**
+     * Come {@link #sendCommand(String, ResultCallback)} ma attende l'ack fino a
+     * {@code waitMs}: init/resume del telescopio possono durare minuti. Oltre i
+     * 14 s un ack mancante è un errore (prima veniva dato come OK).
+     */
+    public void sendCommand(String line, long waitMs, ResultCallback callback) {
+        final int rounds = (int) Math.max(1, waitMs / 350L);
+        final boolean longWait = waitMs > 14_000L;
         executor.execute(() -> {
-            if (TextUtils.isEmpty(deviceSerial)) {
-                deliver(callback, false, "Device non connesso. Usa Connetti prima.");
-                return;
-            }
             String cmd = line == null ? "" : line.trim();
             if (cmd.isEmpty()) {
                 deliver(callback, false, "Comando vuoto");
                 return;
             }
-            runAdb("-s", deviceSerial, "shell", "rm", "-f", REMOTE_ACK);
-            String escaped = cmd.replace("'", "'\\''");
-            String shellCmd = "printf '%s\\n' '" + escaped + "' > " + REMOTE_REQ;
-            ExecResult write = runAdb("-s", deviceSerial, "shell", shellCmd);
-            if (write.exitCode != 0) {
-                deliver(callback, false, write.combined());
-                return;
-            }
-            File ackFile = new File(appContext.getCacheDir(), "remote.ack");
-            String ack = "";
-            for (int i = 0; i < 40; i++) {
-                try {
-                    Thread.sleep(350);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-                ExecResult pull = runAdb(
-                        "-s", deviceSerial,
-                        "pull",
-                        REMOTE_ACK,
-                        ackFile.getAbsolutePath()
-                );
-                if (pull.exitCode == 0 && ackFile.isFile()) {
-                    ack = readPulledText(ackFile).trim();
+            try {
+                withClient(c -> {
+                    try {
+                        c.shell("rm -f '" + REMOTE_ACK + "'");
+                    } catch (AdbClient.RemoteFail ignored) {
+                    }
+                    c.pushBytes(REMOTE_REQ, (cmd + "\n").getBytes(StandardCharsets.UTF_8));
+                    return null;
+                });
+                String ack = "";
+                for (int i = 0; i < rounds; i++) {
+                    try {
+                        Thread.sleep(350);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    byte[] raw;
+                    try {
+                        raw = withClient(c -> c.pullBytes(REMOTE_ACK));
+                    } catch (AdbClient.RemoteFail notYet) {
+                        continue;
+                    }
+                    ack = new String(raw, StandardCharsets.UTF_8).trim();
                     if (!ack.isEmpty()) {
-                        boolean ok = ack.startsWith("OK|");
-                        deliver(callback, ok, ack);
+                        deliver(callback, ack.startsWith("OK|"), ack);
                         return;
                     }
                 }
+                if (longWait && ack.isEmpty()) {
+                    deliver(callback, false,
+                            "Nessuna risposta dall'Helper sul Pi (è avviato?)");
+                    return;
+                }
+                deliver(callback, true, ack.isEmpty()
+                        ? "Comando inviato (nessun ack ancora). Helper ≥ 0.8.19?"
+                        : ack);
+            } catch (IOException e) {
+                deliver(callback, false, failText(e, "Comando fallito"));
             }
-            deliver(callback, true, "Comando inviato (nessun ack ancora). Helper ≥ 0.6.95?");
         });
     }
 
-    /** Alias: invia la riga protocollo così com'è. */
     public void sendLine(String line, ResultCallback callback) {
         sendCommand(line, callback);
     }
 
+    public void sendLine(String line, long waitMs, ResultCallback callback) {
+        sendCommand(line, waitMs, callback);
+    }
+
     /** @deprecated usare {@link #sendLine(String, ResultCallback)} con protocollo pipe. */
+    @Deprecated
     public void sendNamedCommand(String cmd, ResultCallback callback) {
         sendLine(cmd, callback);
     }
@@ -164,22 +223,20 @@ public final class AdbBridge {
 
     public void pullRemote(String remotePath, File localDest, ResultCallback callback) {
         executor.execute(() -> {
-            if (TextUtils.isEmpty(deviceSerial)) {
-                deliver(callback, false, "Device non connesso.");
-                return;
+            try {
+                byte[] data = withClient(c -> c.pullBytes(remotePath));
+                File parent = localDest.getParentFile();
+                if (parent != null && !parent.exists()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    parent.mkdirs();
+                }
+                try (FileOutputStream fos = new FileOutputStream(localDest)) {
+                    fos.write(data);
+                }
+                deliver(callback, true, remotePath);
+            } catch (IOException e) {
+                deliver(callback, false, failText(e, "Lettura fallita"));
             }
-            File parent = localDest.getParentFile();
-            if (parent != null && !parent.exists()) {
-                //noinspection ResultOfMethodCallIgnored
-                parent.mkdirs();
-            }
-            ExecResult result = runAdb(
-                    "-s", deviceSerial,
-                    "pull",
-                    remotePath,
-                    localDest.getAbsolutePath()
-            );
-            deliver(callback, result.exitCode == 0, result.combined());
         });
     }
 
@@ -207,112 +264,151 @@ public final class AdbBridge {
 
     public void shutdown() {
         executor.shutdownNow();
+        closeClient(null);
     }
 
-    private String resolveDefaultAdbPath() {
-        // Preferenza: binario già estratto in filesDir/adb/adb
-        File extracted = new File(appContext.getFilesDir(), "adb/adb");
-        if (extracted.exists() && extracted.canExecute()) {
-            return extracted.getAbsolutePath();
-        }
-        // Placeholder assets: documenta dove mettere il binario
-        ensureAssetsPlaceholder();
-        // Fallback path tipici (device host / emulatore con adb nel PATH di Runtime)
-        return "adb";
-    }
+    // ---- interno (solo dal thread executor) ----
 
-    private void ensureAssetsPlaceholder() {
-        File marker = new File(appContext.getFilesDir(), "adb/PLACEHOLDER");
-        if (marker.exists()) {
-            return;
-        }
+    /**
+     * Esegue l'operazione sul client; se il trasporto cade (socket chiuso, timeout,
+     * pacchetti fuori sequenza) riapre la connessione e riprova una volta.
+     * Un FAIL del Pi (file mancante ecc.) non causa riconnessione.
+     */
+    private <T> T withClient(Op<T> op) throws IOException {
+        AdbClient c = live();
         try {
-            File dir = marker.getParentFile();
-            if (dir != null && !dir.exists()) {
-                //noinspection ResultOfMethodCallIgnored
-                dir.mkdirs();
+            return op.run(c);
+        } catch (AdbClient.RemoteFail e) {
+            throw e;
+        } catch (IOException first) {
+            Log.w(TAG, "adb transport, riconnetto", first);
+            closeClient(null);
+            c = live();
+            try {
+                return op.run(c);
+            } catch (AdbClient.RemoteFail e) {
+                throw e;
+            } catch (IOException second) {
+                closeClient("Connessione ADB persa");
+                throw new IOException("Connessione ADB persa: " + failText(second, "errore di rete"));
             }
-            try (InputStream in = appContext.getAssets().open(ASSETS_ADB_PLACEHOLDER)) {
-                // solo verifica presenza asset; il binario va fornito a parte
-                in.read();
-            }
-            //noinspection ResultOfMethodCallIgnored
-            marker.createNewFile();
-        } catch (IOException e) {
-            Log.i(TAG, "Asset adb placeholder assente o non leggibile: " + e.getMessage());
         }
     }
 
-    private ExecResult runAdb(String... args) {
-        List<String> cmd = new ArrayList<>();
-        cmd.add(adbPath);
-        for (String arg : args) {
-            cmd.add(arg);
+    /** Client pronto; se serve riconnette a ultimo host o a IP/porta salvati. */
+    private AdbClient live() throws IOException {
+        if (ready()) return client;
+        if (manualDisconnect) {
+            throw new IOException("Disconnesso. Premi Connetti ADB.");
         }
-        Log.d(TAG, "exec: " + cmd);
-        Process process = null;
+        String host = targetHost();
+        if (TextUtils.isEmpty(host)) {
+            throw new IOException("IP del Pi mancante (Impostazioni).");
+        }
+        int port = targetPort();
         try {
-            // Runtime.exec sul binario adb (path configurabile / assets placeholder)
-            process = Runtime.getRuntime().exec(cmd.toArray(new String[0]));
-            String stdout = readStream(process.getInputStream());
-            String stderr = readStream(process.getErrorStream());
-            boolean finished = process.waitFor(60, TimeUnit.SECONDS);
-            int code = finished ? process.exitValue() : -1;
-            if (!finished) {
-                process.destroyForcibly();
-                stderr = (stderr + "\ntimeout").trim();
-            }
-            return new ExecResult(code, stdout, stderr);
+            openClient(host, port);
         } catch (Exception e) {
-            Log.e(TAG, "runAdb failed", e);
-            return new ExecResult(-1, "", e.getMessage() == null ? "error" : e.getMessage());
-        } finally {
-            if (process != null) {
-                process.destroy();
+            throw new IOException(connectError(host, port, e));
+        }
+        return client;
+    }
+
+    private void openClient(String host, int port) throws Exception {
+        closeClient(null);
+        AdbClient opened = new AdbClient();
+        try {
+            opened.connect(host, port, keys());
+        } catch (Exception e) {
+            opened.close();
+            fire(false, host + ":" + port, connectError(host, port, e));
+            throw e;
+        }
+        client = opened;
+        deviceSerial = host + ":" + port;
+        lastHost = host;
+        lastPort = port;
+        fire(true, deviceSerial, null);
+    }
+
+    private String targetHost() {
+        if (!TextUtils.isEmpty(lastHost)) return lastHost;
+        return DevicePrefs.getIp(appContext);
+    }
+
+    private int targetPort() {
+        if (!TextUtils.isEmpty(lastHost) && lastPort > 0) return lastPort;
+        return DevicePrefs.getAdbPort(appContext);
+    }
+
+    private boolean ready() {
+        AdbClient c = client;
+        return c != null && c.isConnected() && !TextUtils.isEmpty(deviceSerial);
+    }
+
+    private AdbKeys keys() throws Exception {
+        if (keys == null) {
+            keys = AdbKeys.load(appContext);
+        }
+        return keys;
+    }
+
+    private void closeClient(String reason) {
+        boolean was = client != null;
+        String target = deviceSerial;
+        if (client != null) {
+            client.close();
+            client = null;
+        }
+        deviceSerial = null;
+        if (was && reason != null) {
+            fire(false, target, reason);
+        }
+    }
+
+    private void fire(boolean linked, String target, String message) {
+        for (StateListener l : listeners) {
+            try {
+                l.onAdbState(linked, target, message);
+            } catch (RuntimeException e) {
+                Log.w(TAG, "listener", e);
             }
         }
     }
 
-    private static String readStream(InputStream in) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(in, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (sb.length() > 0) {
-                    sb.append('\n');
-                }
-                sb.append(line);
-            }
+    private static String failText(IOException e, String fallback) {
+        String m = e.getMessage();
+        return m == null || m.trim().isEmpty() ? fallback : m;
+    }
+
+    private static String connectError(String host, int port, Exception e) {
+        Log.w(TAG, "connect", e);
+        if (e instanceof ConnectException) {
+            return "Porta " + port + " chiusa su " + host + ". Sul Pi serve ADB in rete (5555).";
         }
-        return sb.toString();
+        if (e instanceof UnknownHostException) {
+            return "IP non valido: " + host;
+        }
+        if (e instanceof SocketTimeoutException) {
+            return "Nessuna risposta da " + host + ":" + port + ". Stessa rete del Pi?";
+        }
+        String msg = e.getMessage();
+        if (msg == null || msg.trim().isEmpty()) {
+            return "Connessione a " + host + ":" + port + " fallita";
+        }
+        String low = msg.toLowerCase();
+        if (low.contains("connection refused") || low.contains("failed to connect")) {
+            return "Porta " + port + " chiusa su " + host + ". Sul Pi serve ADB in rete (5555).";
+        }
+        if (low.contains("timed out") || low.contains("timeout")) {
+            return "Nessuna risposta da " + host + ":" + port + ". Stessa rete del Pi?";
+        }
+        return msg;
     }
 
     private static void deliver(ResultCallback callback, boolean ok, String message) {
         if (callback != null) {
             callback.onResult(ok, message);
-        }
-    }
-
-    private static final class ExecResult {
-        final int exitCode;
-        final String stdout;
-        final String stderr;
-
-        ExecResult(int exitCode, String stdout, String stderr) {
-            this.exitCode = exitCode;
-            this.stdout = stdout == null ? "" : stdout;
-            this.stderr = stderr == null ? "" : stderr;
-        }
-
-        String combined() {
-            if (stderr.isEmpty()) {
-                return stdout;
-            }
-            if (stdout.isEmpty()) {
-                return stderr;
-            }
-            return stdout + "\n" + stderr;
         }
     }
 }

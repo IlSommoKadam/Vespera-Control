@@ -12,7 +12,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -24,20 +28,84 @@ import java.util.regex.Pattern;
 public final class FtpPreview {
     private static final Pattern OUTPUT = Pattern.compile("(?i).*?-output\\.jpe?g$");
     private static final Pattern OBS = Pattern.compile(
-            "(?i)^(\\d{4}-\\d{2}-\\d{2}).{0,48}?(?:observation|acquisition)[_\\s-]+(.+)$");
+            "(?i)^(\\d{4})-(\\d{2})-(\\d{2})(?:_(\\d{2})-(\\d{2})-(\\d{2}))?"
+                    + ".{0,48}?(?:observation|acquisition)[_\\s-]+(.+)$");
 
     public static final class Item {
         public final String label;
         public final String folder;
+        /** Firma dell'ultimo *-output.jpg (path + ora): cambia quando la cartella si aggiorna. */
+        public final String signature;
+        /** Contrassegno mostrato in lista ("nuovo", "in aggiornamento"), vuoto se invariato. */
+        public String mark = "";
 
         public Item(String label, String folder) {
+            this(label, folder, "");
+        }
+
+        public Item(String label, String folder, String signature) {
             this.label = label;
             this.folder = folder;
+            this.signature = signature == null ? "" : signature;
         }
 
         @Override public String toString() {
-            return label;
+            return mark == null || mark.isEmpty() ? label : label + "  \u00b7  " + mark;
         }
+    }
+
+    /** Callback progresso download (0–100). Può essere chiamato da thread worker. */
+    public interface ProgressListener {
+        void onProgress(int percent);
+    }
+
+    /** Bitmap + nome file remoto dell'ultimo *-output.jpg. */
+    public static final class Preview {
+        public final Bitmap bitmap;
+        public final String fileName;
+        public final String remotePath;
+
+        public Preview(Bitmap bitmap, String fileName, String remotePath) {
+            this.bitmap = bitmap;
+            this.fileName = fileName;
+            this.remotePath = remotePath;
+        }
+    }
+
+    private static final class LatestOutput {
+        final String path;
+        final long timeMs;
+
+        LatestOutput(String path, long timeMs) {
+            this.path = path;
+            this.timeMs = timeMs;
+        }
+    }
+
+    /** Estrae target e data/ora dal nome cartella Vespera (creazione osservazione). */
+    static String[] observationParts(String name) {
+        if (name == null) return new String[] {"", ""};
+        java.util.regex.Matcher m = OBS.matcher(name);
+        if (!m.matches()) return new String[] {"", ""};
+        String year = m.group(1);
+        String month = m.group(2);
+        String day = m.group(3);
+        String hour = m.group(4);
+        String minute = m.group(5);
+        String target = m.group(7) == null ? "" : m.group(7).replace('_', ' ').trim();
+        String when;
+        if (hour != null && minute != null) {
+            when = day + "/" + month + "/" + year + " " + hour + ":" + minute;
+        } else {
+            when = day + "/" + month + "/" + year;
+        }
+        return new String[] {target, when};
+    }
+
+    private static String formatWhen(long timeMs) {
+        if (timeMs <= 0L) return "";
+        SimpleDateFormat fmt = new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.ITALY);
+        return fmt.format(new Date(timeMs));
     }
 
     private FtpPreview() {}
@@ -51,19 +119,54 @@ public final class FtpPreview {
             cwd(ftp, base);
             FTPFile[] files = ftp.listFiles();
             if (files == null) return out;
+            List<Item> scored = new ArrayList<>();
+            List<Long> sortKeys = new ArrayList<>();
             for (FTPFile f : files) {
                 if (f == null || !f.isDirectory()) continue;
                 String name = f.getName();
                 if (".".equals(name) || "..".equals(name)) continue;
-                String label = name;
-                java.util.regex.Matcher m = OBS.matcher(name);
-                if (m.matches()) {
-                    label = m.group(2).replace('_', ' ').trim() + " · " + m.group(1);
-                }
+                String[] parts = observationParts(name);
                 String folder = base.endsWith("/") ? base + name : base + "/" + name;
-                out.add(new Item(label, folder));
-                if (out.size() >= 80) break;
+                LatestOutput latest = findLatestOutput(ftp, folder, 0);
+                long folderTime = f.getTimestamp() == null ? 0L : f.getTimestamp().getTimeInMillis();
+                String when;
+                long sortTime;
+                if (latest != null && latest.timeMs > 0L) {
+                    when = formatWhen(latest.timeMs);
+                    sortTime = latest.timeMs;
+                } else if (folderTime > 0L) {
+                    when = formatWhen(folderTime);
+                    sortTime = folderTime;
+                } else {
+                    when = parts[1];
+                    sortTime = 0L;
+                }
+                String label = name;
+                if (!parts[0].isEmpty()) {
+                    label = parts[0];
+                    if (!when.isEmpty()) {
+                        label = label + " · " + when;
+                    }
+                } else if (!when.isEmpty()) {
+                    label = name + " · " + when;
+                }
+                String signature = latest != null
+                        ? latest.path + "@" + latest.timeMs
+                        : "dir@" + folderTime;
+                scored.add(new Item(label, folder, signature));
+                sortKeys.add(sortTime);
+                if (scored.size() >= 80) break;
             }
+            List<Integer> order = new ArrayList<>();
+            for (int i = 0; i < scored.size(); i++) order.add(i);
+            Collections.sort(order, new Comparator<Integer>() {
+                @Override public int compare(Integer a, Integer b) {
+                    int byTime = Long.compare(sortKeys.get(b), sortKeys.get(a));
+                    if (byTime != 0) return byTime;
+                    return scored.get(a).label.compareToIgnoreCase(scored.get(b).label);
+                }
+            });
+            for (int idx : order) out.add(scored.get(idx));
             return out;
         } finally {
             disconnectQuietly(ftp);
@@ -71,22 +174,35 @@ public final class FtpPreview {
     }
 
     public static Bitmap loadLatestOutput(String host, int port, String folder) throws IOException {
+        return loadLatestPreview(host, port, folder).bitmap;
+    }
+
+    public static Preview loadLatestPreview(String host, int port, String folder) throws IOException {
+        return loadLatestPreview(host, port, folder, null);
+    }
+
+    public static Preview loadLatestPreview(
+            String host, int port, String folder, ProgressListener progress) throws IOException {
         FTPClient ftp = connect(host, port);
         try {
-            String best = findLatestOutput(ftp, folder, 0);
+            LatestOutput best = findLatestOutput(ftp, folder, 0);
             if (best == null) {
                 throw new IOException("Nessun *-output.jpg in " + folder);
             }
-            byte[] data = download(ftp, best);
+            long knownSize = sizeOf(ftp, best.path);
+            byte[] data = download(ftp, best.path, knownSize, progress);
             Bitmap bmp = BitmapFactory.decodeByteArray(data, 0, data.length);
-            if (bmp == null) throw new IOException("JPEG non decodificabile: " + best);
-            return bmp;
+            if (bmp == null) throw new IOException("JPEG non decodificabile: " + best.path);
+            int slash = best.path.lastIndexOf('/');
+            String name = slash >= 0 ? best.path.substring(slash + 1) : best.path;
+            return new Preview(bmp, name, best.path);
         } finally {
             disconnectQuietly(ftp);
         }
     }
 
-    private static String findLatestOutput(FTPClient ftp, String path, int depth) throws IOException {
+    private static LatestOutput findLatestOutput(FTPClient ftp, String path, int depth)
+            throws IOException {
         if (depth > 5) return null;
         cwd(ftp, path);
         FTPFile[] files = ftp.listFiles();
@@ -113,29 +229,68 @@ public final class FtpPreview {
             }
         }
         for (String dir : dirs) {
-            String hit = findLatestOutput(ftp, dir, depth + 1);
-            if (hit != null && bestFile == null) bestFile = hit;
+            LatestOutput hit = findLatestOutput(ftp, dir, depth + 1);
+            if (hit == null) continue;
+            if (hit.timeMs >= bestTime) {
+                bestTime = hit.timeMs;
+                bestFile = hit.path;
+            }
         }
-        return bestFile;
+        return bestFile == null ? null : new LatestOutput(bestFile, Math.max(bestTime, 0L));
     }
 
-    private static byte[] download(FTPClient ftp, String remote) throws IOException {
+    private static long sizeOf(FTPClient ftp, String remote) throws IOException {
+        int slash = remote.lastIndexOf('/');
+        String dir = slash >= 0 ? remote.substring(0, slash) : "/";
+        String name = slash >= 0 ? remote.substring(slash + 1) : remote;
+        cwd(ftp, dir);
+        FTPFile[] files = ftp.listFiles(name);
+        if (files == null) return -1L;
+        for (FTPFile f : files) {
+            if (f != null && name.equals(f.getName())) {
+                return Math.max(-1L, f.getSize());
+            }
+        }
+        return -1L;
+    }
+
+    private static byte[] download(
+            FTPClient ftp, String remote, long knownSize, ProgressListener progress)
+            throws IOException {
         int slash = remote.lastIndexOf('/');
         String dir = slash >= 0 ? remote.substring(0, slash) : "/";
         String name = slash >= 0 ? remote.substring(slash + 1) : remote;
         cwd(ftp, dir);
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        if (progress != null) progress.onProgress(0);
         try (InputStream in = ftp.retrieveFileStream(name)) {
             if (in == null) throw new IOException("RETR fallito: " + remote);
             byte[] buf = new byte[16_384];
             int n;
+            long read = 0L;
+            int lastPct = -1;
             while ((n = in.read(buf)) >= 0) {
                 bos.write(buf, 0, n);
+                read += n;
+                if (progress != null) {
+                    int pct;
+                    if (knownSize > 0L) {
+                        pct = (int) Math.min(99L, (read * 100L) / knownSize);
+                    } else {
+                        // Senza size: stima soft ogni ~256 KB.
+                        pct = (int) Math.min(90L, read / 2_621L);
+                    }
+                    if (pct != lastPct) {
+                        lastPct = pct;
+                        progress.onProgress(pct);
+                    }
+                }
             }
         }
         if (!ftp.completePendingCommand()) {
             throw new IOException("RETR incompleto: " + remote);
         }
+        if (progress != null) progress.onProgress(100);
         return bos.toByteArray();
     }
 

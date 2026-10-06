@@ -12,13 +12,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 OBS_DIR = re.compile(
-    r"(?i)^(\d{4}-\d{2}-\d{2}).{0,48}?(?:observation|acquisition)[_\s-]+(.+)$"
+    r"(?i)^(\d{4})-(\d{2})-(\d{2})(?:_(\d{2})-(\d{2})-(\d{2}))?"
+    r".{0,48}?(?:observation|acquisition)[_\s-]+(.+)$"
 )
 CATALOG = re.compile(
     r"(?i)\b(M\s*\d{1,3}|NGC\s*\d{1,4}|IC\s*\d{1,4}|SH\s*2\s*-?\s*\d{1,4})\b"
 )
 OUTPUT_NAME = re.compile(r"(?i).*-output\.jpe?g$")
+OUTPUT_INDEX = re.compile(r"(?i)img-(\d+)-output\.jpe?g$")
 IMAGE_EXT = {".jpg", ".jpeg", ".png"}
+# Il LIST di questo FTP è in inglese (ls), indipendente dalla lingua di Windows.
+_LIST_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
 
 # Sottoinsieme dei nomi comuni (StarStacKadam CommonNames).
 COMMON_NAME = {
@@ -51,6 +58,8 @@ class SkyObject:
     folder: str
     output_path: str = ""
     images: list[str] = field(default_factory=list)
+    # Firma dell'ultimo *-output.jpg (path + ora): cambia quando la cartella si aggiorna.
+    signature: str = ""
 
 
 class PreviewError(Exception):
@@ -74,6 +83,20 @@ def parse_endpoint(text: str, default_port: int) -> tuple[str, int]:
 def common_name_for(target: str) -> str:
     key = re.sub(r"[\s_-]+", "", (target or "").lower())
     return COMMON_NAME.get(key, "")
+
+
+def observation_parts(name: str) -> tuple[str, str]:
+    """Estrae target e data/ora dal nome cartella Vespera."""
+    match = OBS_DIR.match(name or "")
+    if not match:
+        return "", ""
+    year, month, day, hour, minute, _sec, target = match.groups()
+    target = (target or "").strip("_- ")
+    if hour is not None and minute is not None:
+        when = f"{day}/{month}/{year} {hour}:{minute}"
+    else:
+        when = f"{day}/{month}/{year}"
+    return target, when
 
 
 def open_ftp(host: str, port: int, timeout: float = 12) -> ftplib.FTP:
@@ -109,6 +132,35 @@ def reachable(host: str, port: int, timeout: float = 6) -> bool:
         return False
 
 
+def _output_index(name: str) -> int:
+    match = OUTPUT_INDEX.search(name or "")
+    return int(match.group(1)) if match else -1
+
+
+def _list_mtime(month: str, day: str, clock_or_year: str) -> float:
+    """Ora locale del LIST Unix (`Oct 04 02:14` oppure `Oct 04 2025`)."""
+    mon = _LIST_MONTHS.get((month or "").lower())
+    if not mon:
+        return 0.0
+    try:
+        day_n = int(day)
+    except ValueError:
+        return 0.0
+    now = time.time()
+    try:
+        if ":" in clock_or_year:
+            hour_s, minute_s = clock_or_year.split(":", 1)
+            year = time.localtime(now).tm_year
+            stamp = time.mktime((year, mon, day_n, int(hour_s), int(minute_s), 0, 0, 0, -1))
+            # Senza anno: se cade nel futuro, è l'anno precedente.
+            if stamp > now + 24 * 3600:
+                stamp = time.mktime((year - 1, mon, day_n, int(hour_s), int(minute_s), 0, 0, 0, -1))
+            return stamp
+        return time.mktime((int(clock_or_year), mon, day_n, 0, 0, 0, 0, 0, -1))
+    except (OverflowError, ValueError):
+        return 0.0
+
+
 def _entries(ftp: ftplib.FTP) -> list[tuple[str, str, float, int]]:
     try:
         found: list[tuple[str, str, float, int]] = []
@@ -137,7 +189,8 @@ def _entries(ftp: ftplib.FTP) -> list[tuple[str, str, float, int]]:
             if len(parts) < 9 or parts[8] in {".", ".."}:
                 continue
             size = int(parts[4]) if parts[4].isdigit() else 0
-            parsed.append((parts[8], "dir" if parts[0].startswith("d") else "file", 0.0, size))
+            mtime = _list_mtime(parts[5], parts[6], parts[7])
+            parsed.append((parts[8], "dir" if parts[0].startswith("d") else "file", mtime, size))
         return parsed
 
 
@@ -148,6 +201,55 @@ def _join(*parts: str) -> str:
         if part:
             bits.append(part)
     return "/" + "/".join(bits)
+
+
+def _format_when(mtime: float) -> str:
+    if not mtime:
+        return ""
+    return time.strftime("%d/%m/%Y %H:%M", time.localtime(mtime))
+
+
+def _latest_output(ftp: ftplib.FTP, folder: str, depth: int = 0) -> tuple[str, float]:
+    """Path e mtime dell'ultimo *-output.jpg (stesso criterio dell'anteprima)."""
+    if depth > 5:
+        return "", 0.0
+    try:
+        ftp.cwd("/")
+        for part in folder.strip("/").split("/"):
+            if part:
+                ftp.cwd(part)
+    except ftplib.Error:
+        return "", 0.0
+    best_path = ""
+    best_mtime = -1.0
+    best_index = -1
+    dirs: list[str] = []
+    for name, kind, mtime, _size in _entries(ftp):
+        remote = _join(folder, name)
+        if kind == "dir":
+            lowered = name.lower()
+            if "dark" in lowered or "expert" in lowered:
+                continue
+            dirs.append(remote)
+            continue
+        if not OUTPUT_NAME.match(name):
+            continue
+        stamp = float(mtime or 0.0)
+        index = _output_index(name)
+        if (stamp, index) >= (best_mtime, best_index):
+            best_mtime = stamp
+            best_index = index
+            best_path = remote
+    for sub in dirs:
+        path, stamp = _latest_output(ftp, sub, depth + 1)
+        if not path:
+            continue
+        index = _output_index(path)
+        if (stamp, index) >= (best_mtime, best_index):
+            best_mtime = stamp
+            best_index = index
+            best_path = path
+    return best_path, max(best_mtime, 0.0)
 
 
 def list_objects(host: str, port: int, limit: int = 80) -> list[SkyObject]:
@@ -162,33 +264,42 @@ def list_objects(host: str, port: int, limit: int = 80) -> list[SkyObject]:
             dirs = _entries(ftp)
         else:
             dirs = root
-        objects: list[SkyObject] = []
+        objects: list[tuple[float, SkyObject]] = []
         folders = [(n, mt) for n, k, mt, _sz in dirs if k == "dir"]
         folders.sort(key=lambda item: (item[1], item[0]), reverse=True)
         for name, mtime in folders[:limit]:
-            match = OBS_DIR.match(name)
-            if match:
-                day, target = match.group(1), match.group(2).strip("_- ")
-            else:
+            target, when_obs = observation_parts(name)
+            if not target:
                 cat = CATALOG.search(name)
                 target = cat.group(1).replace(" ", "") if cat else name
-                day = time.strftime("%Y-%m-%d", time.localtime(mtime)) if mtime else ""
+            folder = _join(base, name) if base else f"/{name}"
+            latest_path, stack_mtime = _latest_output(ftp, folder)
+            signature = f"{latest_path}@{stack_mtime:.0f}" if latest_path else f"dir@{mtime or 0}"
+            if stack_mtime:
+                when = _format_when(stack_mtime)
+                sort_key = stack_mtime
+            elif mtime:
+                when = _format_when(mtime)
+                sort_key = mtime
+            else:
+                when = when_obs
+                sort_key = 0.0
             public = common_name_for(target)
-            when = ""
-            if mtime:
-                when = time.strftime("%d/%m/%Y %H:%M", time.localtime(mtime))
-            elif day:
-                when = day
             objects.append(
-                SkyObject(
-                    label=f"{target} · {public}" if public else target,
-                    target=target,
-                    public_name=public,
-                    when=when,
-                    folder=_join(base, name) if base else f"/{name}",
+                (
+                    sort_key,
+                    SkyObject(
+                        label=f"{target} · {public}" if public else target,
+                        target=target,
+                        public_name=public,
+                        when=when,
+                        folder=folder,
+                        signature=signature,
+                    ),
                 )
             )
-        return objects
+        objects.sort(key=lambda item: (-item[0], item[1].label.lower()))
+        return [obj for _key, obj in objects]
     finally:
         try:
             ftp.quit()
@@ -226,19 +337,21 @@ def load_object_preview(host: str, port: int, folder: str) -> SkyObject:
                     outputs.append((remote, mtime, size))
 
         walk(folder, 0)
-        images.sort(key=lambda item: (item[1], item[0]), reverse=True)
-        outputs.sort(key=lambda item: (item[1], item[0]), reverse=True)
+        images.sort(key=lambda item: (item[1], _output_index(item[0]), item[0]), reverse=True)
+        outputs.sort(key=lambda item: (item[1], _output_index(item[0]), item[0]), reverse=True)
         output = outputs[0][0] if outputs else (images[0][0] if images else "")
-        target = Path(folder.rstrip("/")).name
-        match = OBS_DIR.match(target)
-        if match:
-            target = match.group(2).strip("_- ")
+        stack_mtime = outputs[0][1] if outputs else (images[0][1] if images else 0.0)
+        folder_name = Path(folder.rstrip("/")).name
+        target, when_obs = observation_parts(folder_name)
+        if not target:
+            target = folder_name
+        when = _format_when(stack_mtime) if stack_mtime else when_obs
         public = common_name_for(target)
         return SkyObject(
             label=f"{target} · {public}" if public else target,
             target=target,
             public_name=public,
-            when="",
+            when=when,
             folder=folder,
             output_path=output,
             images=[path for path, _m, _s in images[:40]],

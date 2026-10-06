@@ -75,7 +75,7 @@ public final class MegaPublic {
             if (size > plain.length) size = plain.length;
             return Arrays.copyOf(plain, size);
         }
-        throw new IllegalStateException("Nel link pubblico non c'Ã¨ " + wanted);
+        throw new IllegalStateException("Nel link pubblico non c'è " + wanted);
     }
 
     public static byte[] downloadBytes(String url) throws Exception {
@@ -217,6 +217,9 @@ public final class MegaPublic {
     }
 
     private static byte[] httpBytes(String url, int readTimeoutMs) throws Exception {
+        if (url == null || !url.trim().regionMatches(true, 0, "https://", 0, 8)) {
+            throw new IllegalStateException("Download non sicuro rifiutato");
+        }
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         connection.setConnectTimeout(30_000);
         connection.setReadTimeout(readTimeoutMs);

@@ -3,7 +3,7 @@
 App Android all-in-one (scaffold) per controllare da remoto **Vespera Helper** tramite ADB e, in seguito, mirror schermo via scrcpy.
 
 - **applicationId**: `com.vaonis.vesperacontrol`
-- **version**: 0.1.0 (versionCode 1)
+- **version**: 0.2.15 (versionCode 18)
 - **minSdk**: 29 · **compileSdk / targetSdk**: 35 · **Java**: 17
 
 ## Dipendenze di sistema
@@ -81,5 +81,5 @@ app/src/main/java/com/vaonis/vesperacontrol/
 ## Note
 
 - Permesso `INTERNET` dichiarato (FTP / rete / mirror).
-- Cleartext traffic abilitato per FTP locale in LAN.
+- Traffico HTTP dell'app solo in HTTPS. FTP e ADB usano socket TCP verso il telescopio.
 - I comandi JSON (`{"cmd":"park"}` ecc.) sono stub allineati al protocollo RemoteBridge; adattare i nomi campo quando il contratto Helper è definitivo.

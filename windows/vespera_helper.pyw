@@ -37,6 +37,13 @@ ERR = "#ff6b6b"
 PRIMARY = "#2f6fe0"
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+APP_USER_MODEL_ID = "IlSommoKadam.VesperaWinHelper"
+
+try:
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+except Exception:
+    pass
+
 FALLBACK_HELP = (
     "--tcpip --serial --max-size --video-bit-rate --video-codec --video-encoder "
     "--always-on-top --turn-screen-off --stay-awake --no-audio --window-title"
@@ -588,8 +595,11 @@ def _materialize_shot(ftp: ftplib.FTP, host: str, item: dict, cache: Path) -> di
         full_path.write_bytes(full_bytes)
         thumb_path.write_bytes(thumb_bytes)
     target, when_obs = _observation_parts(item["observation"])
-    when = when_obs or (
-        time.strftime("%d/%m/%Y %H:%M", time.localtime(item["mtime"])) if item["mtime"] else ""
+    # Ora = mtime dell'ultimo stack/output (come in anteprima), non creazione cartella.
+    when = (
+        time.strftime("%d/%m/%Y %H:%M", time.localtime(item["mtime"]))
+        if item.get("mtime")
+        else when_obs
     )
     return {
         "label": target,
@@ -622,12 +632,13 @@ def load_vespera_folders(host: str, obs_limit: int = 8) -> list[dict]:
             shots = [_materialize_shot(ftp, host, item, cache) for item in selected]
             if not shots:
                 continue
-            target, when = _observation_parts(group[0]["observation"])
+            target, when_obs = _observation_parts(group[0]["observation"])
+            when = shots[0].get("when", "") or when_obs
             folders.append(
                 {
                     "observation": group[0]["observation"],
                     "label": target,
-                    "when": when or shots[0].get("when", ""),
+                    "when": when,
                     "count": len(group),
                     "shots": shots,
                     "thumb": shots[0]["thumb"],
@@ -805,12 +816,14 @@ class App(tk.Tk):
         self.geometry("1180x820")
         self.minsize(1020, 700)
         self.configure(bg=BG)
-        # Stessa icona di VesperaHelper
+        # Icona telescopio in titlebar/taskbar (non quella di pythonw).
         try:
             ico = Path(__file__).resolve().parent / "vespera.ico"
             png = Path(__file__).resolve().parent / "vespera_launcher_icon.png"
             if ico.is_file():
-                self.iconbitmap(default=str(ico))
+                ico_path = str(ico.resolve())
+                self.iconbitmap(ico_path)
+                self.iconbitmap(default=ico_path)
             if png.is_file():
                 from PIL import Image, ImageTk
 

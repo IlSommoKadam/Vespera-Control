@@ -13,8 +13,8 @@ from pathlib import Path
 
 MEGA_FOLDER = "https://mega.nz/folder/HswU1QqC#862Zb92yZ0Upn1PXgW5EKA"
 VERSION_FILE = "vespera-control-win-version.json"
-LOCAL_VERSION = "0.2.0"
-LOCAL_CODE = 3
+LOCAL_VERSION = "0.2.42"
+LOCAL_CODE = 45
 
 
 def compare_version(left: str, right: str) -> int:
@@ -30,8 +30,8 @@ def compare_version(left: str, right: str) -> int:
 
 
 def fetch_manifest_from_share() -> dict | None:
-    """Prima prova C:\\WORK\\ESA\\Share locale (sync Mega), poi solo metadati."""
-    local = Path(r"C:\WORK\ESA\Share") / VERSION_FILE
+    """Prima prova C:\\WORK\\ESA\\Share\\pub (cartella pubblica Mega), poi solo metadati."""
+    local = Path(r"C:\WORK\ESA\Share\pub") / VERSION_FILE
     if local.is_file():
         try:
             return json.loads(local.read_text(encoding="utf-8"))
@@ -54,14 +54,14 @@ def check_async(callback) -> None:
         try:
             remote = fetch_manifest_from_share()
             if remote is None:
-                callback(None, "Apri la cartella Mega pubblica o sync Share locale.")
+                callback(None, None)
                 return
             if is_newer(remote):
                 callback(remote, None)
             else:
-                callback(None, f"Aggiornato ({remote.get('version')})")
-        except Exception as exc:
-            callback(None, str(exc))
+                callback(None, None)
+        except Exception:
+            callback(None, None)
 
     threading.Thread(target=work, daemon=True).start()
 

@@ -1,0 +1,13 @@
+---
+description: Ad ogni modifica pubblicare una nuova versione x.x.yy
+alwaysApply: true
+---
+
+# Versione e pubblicazione
+
+Dopo ogni modifica al progetto, prima di chiudere il lavoro:
+
+1. Alza la versione in formato `x.x.yy`. `yy` è da `01` a `99`. Dopo `99` alza il numero centrale e rimetti `yy` a `00` (es. `0.2.99` → `0.3.00`).
+2. Alza anche `versionCode` di 1, insieme alla versione.
+3. Aggiorna gli stessi numeri in `android/app/build.gradle` (`versionName`, `versionCode`), `windows/vespera_control/updates.py` (`LOCAL_VERSION`, `LOCAL_CODE`) e `windows/publish_share.bat`.
+4. Pubblica la release firmata: `android/gradlew.bat assembleRelease` (copia l'APK in `C:\WORK\ESA\Share`) e `windows/publish_share.bat`. Non pubblicare l'APK debug: le protezioni del telefono lo bloccano.

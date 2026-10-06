@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/scrollTelescopio"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/vespera_bg"
@@ -15,10 +16,19 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/tab_telescopio"
+            android:text="@string/card_telescope"
             android:textColor="@color/vespera_title"
-            android:textSize="18sp"
+            android:textSize="16sp"
             android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/textTelStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:fontFamily="monospace"
+            android:text="—"
+            android:textColor="@color/vespera_text_secondary" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -50,44 +60,341 @@
             android:orientation="horizontal">
 
             <Button
-                android:id="@+id/btnMountHd"
-                style="@style/Widget.Vespera.Button.Slate"
+                android:id="@+id/btnAbort"
+                style="@style/Widget.Vespera.Button.Danger"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/btn_mount_hd" />
+                android:text="@string/btn_abort" />
 
             <Button
-                android:id="@+id/btnUnmountHd"
-                style="@style/Widget.Vespera.Button.Danger"
+                android:id="@+id/btnGoto"
+                style="@style/Widget.Vespera.Button.Primary"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:layout_weight="1"
-                android:text="@string/btn_unmount_hd" />
+                android:text="@string/btn_goto" />
         </LinearLayout>
 
         <Button
-            android:id="@+id/btnGoto"
-            style="@style/Widget.Vespera.Button.Primary"
+            android:id="@+id/btnShutdown"
+            style="@style/Widget.Vespera.Button.Warn"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/btn_goto" />
-
-        <Button
-            android:id="@+id/btnAbort"
-            style="@style/Widget.Vespera.Button.Danger"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/btn_abort" />
+            android:text="@string/btn_shutdown" />
 
         <TextView
             android:id="@+id/textTelescopioLog"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="8dp"
             android:fontFamily="monospace"
             android:text="—"
             android:textColor="@color/vespera_muted" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/telescope_section_details"
+            android:textColor="@color/vespera_title"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/textTelDetails"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:fontFamily="monospace"
+            android:lineSpacingExtra="2dp"
+            android:text="—"
+            android:textColor="@color/vespera_text_secondary" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/telescope_section_observe"
+            android:textColor="@color/vespera_title"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/telescope_observe_hint"
+            android:textColor="@color/vespera_muted"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/editObserveQuery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="@string/telescope_observe_query_hint"
+            android:imeOptions="actionSearch"
+            android:inputType="text"
+            android:singleLine="true"
+            android:textColor="@color/vespera_text"
+            android:textColorHint="@color/vespera_muted" />
+
+        <Button
+            android:id="@+id/btnObserveSearch"
+            style="@style/Widget.Vespera.Button.Primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/telescope_observe_search" />
+
+        <TextView
+            android:id="@+id/textObserveVisibility"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/vespera_text_secondary"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/listObserveHits"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical"
+            android:visibility="gone" />
+
+        <ImageView
+            android:id="@+id/imageObservePreview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:adjustViewBounds="true"
+            android:background="@color/vespera_bg"
+            android:contentDescription="@string/label_preview"
+            android:maxHeight="280dp"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/textObserveDetails"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/vespera_text_secondary"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/btnFavToggle"
+            style="@style/Widget.Vespera.Button.Slate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/fav_add"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/textObserveSession"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/vespera_muted"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/btnObserveContinue"
+            style="@style/Widget.Vespera.Button.Primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/telescope_observe_continue"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/btnObserveStart"
+            style="@style/Widget.Vespera.Button.Slate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/telescope_observe_start"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/textObserveResult"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/vespera_muted"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/textFavTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/fav_section"
+            android:textColor="@color/vespera_title"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/fav_hint"
+            android:textColor="@color/vespera_muted"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnFavPrev"
+                style="@style/Widget.Vespera.Button.Slate"
+                android:layout_width="56dp"
+                android:layout_height="wrap_content"
+                android:text="‹"
+                android:textSize="20sp" />
+
+            <TextView
+                android:id="@+id/textFavDay"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:textColor="@color/vespera_text"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnFavNext"
+                style="@style/Widget.Vespera.Button.Slate"
+                android:layout_width="56dp"
+                android:layout_height="wrap_content"
+                android:text="›"
+                android:textSize="20sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/textFavStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/vespera_muted"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:id="@+id/listFavorites"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical" />
+
+        <Button
+            android:id="@+id/btnPlan"
+            style="@style/Widget.Vespera.Button.Primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/plan_make" />
+
+        <TextView
+            android:id="@+id/textPlan"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="@color/vespera_text_secondary"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/listPlanPeriods"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="vertical" />
+
+        <Button
+            android:id="@+id/btnPlanPropose"
+            style="@style/Widget.Vespera.Button.Slate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/plan_propose"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/rowPlanActions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <Button
+                android:id="@+id/btnPlanSave"
+                style="@style/Widget.Vespera.Button.Slate"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/plan_save" />
+
+            <Button
+                android:id="@+id/btnPlanSend"
+                style="@style/Widget.Vespera.Button.Primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="@string/plan_send" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnPlanDelete"
+            style="@style/Widget.Vespera.Button.Danger"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/plan_delete"
+            android:visibility="gone" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/plan_helper_title"
+            android:textColor="@color/vespera_title"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/textPlanHelper"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/vespera_text"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/btnPlanCancel"
+            style="@style/Widget.Vespera.Button.Warn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/plan_cancel"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/textPlansTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/plan_saved"
+            android:textColor="@color/vespera_title"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/listPlans"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="vertical" />
     </LinearLayout>
 </ScrollView>

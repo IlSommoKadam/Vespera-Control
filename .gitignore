@@ -7,6 +7,7 @@
 **/*.iml
 **/.idea/
 **/captures/
+android/keystore.properties
 
 # Python
 **/__pycache__/
@@ -19,3 +20,9 @@ Thumbs.db
 Desktop.ini
 *.lnk
 .DS_Store
+
+# Firma / archivi temporanei
+*.jks
+*.keystore
+*.tgz
+_to_delete/

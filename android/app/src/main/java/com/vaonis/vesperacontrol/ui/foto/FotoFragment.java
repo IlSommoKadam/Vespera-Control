@@ -1,25 +1,62 @@
 package com.vaonis.vesperacontrol.ui.foto;
 
+import android.graphics.Typeface;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 
 import com.vaonis.vesperacontrol.AdbBridgeHolder;
 import com.vaonis.vesperacontrol.R;
+import com.vaonis.vesperacontrol.RemoteState;
 import com.vaonis.vesperacontrol.adb.AdbBridge;
+import com.vaonis.vesperacontrol.ui.TabRefreshable;
 
-public class FotoFragment extends Fragment {
+import org.json.JSONArray;
+import org.json.JSONObject;
 
+import java.io.File;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+
+public class FotoFragment extends Fragment implements TabRefreshable {
+
+    /** Il file di stato dell'Helper viene riscritto ogni 2,5 s. */
+    private static final long AUTO_REFRESH_MS = 3_000L;
+
+    private TextView textHdStatus;
     private TextView textLog;
+    private TextView textSyncSummary;
+    private TextView textSyncCurrent;
+    private TextView textSyncQueueEmpty;
+    private ProgressBar progressSync;
+    private LinearLayout listSyncQueue;
     private AdbBridge adb;
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private volatile boolean refreshing;
+    private String lastQueueKey = "";
+    private final Runnable autoRefresh = new Runnable() {
+        @Override public void run() {
+            if (!isResumed() || isHidden()) return;
+            refreshHd();
+            handler.postDelayed(this, AUTO_REFRESH_MS);
+        }
+    };
 
     @Nullable
     @Override
@@ -33,14 +70,255 @@ public class FotoFragment extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         adb = AdbBridgeHolder.get(requireContext());
+        textHdStatus = view.findViewById(R.id.textHdStatus);
         textLog = view.findViewById(R.id.textFotoLog);
+        textSyncSummary = view.findViewById(R.id.textSyncSummary);
+        textSyncCurrent = view.findViewById(R.id.textSyncCurrent);
+        textSyncQueueEmpty = view.findViewById(R.id.textSyncQueueEmpty);
+        progressSync = view.findViewById(R.id.progressSync);
+        listSyncQueue = view.findViewById(R.id.listSyncQueue);
 
-        view.<Button>findViewById(R.id.btnTakePhoto)
+        view.<Button>findViewById(R.id.btnHdList)
                 .setOnClickListener(v -> send("cmd|hd|list"));
-        view.<Button>findViewById(R.id.btnStartObs)
+        view.<Button>findViewById(R.id.btnHdMount)
                 .setOnClickListener(v -> send("cmd|hd|mount|"));
-        view.<Button>findViewById(R.id.btnStopObs)
+        view.<Button>findViewById(R.id.btnHdEject)
+                .setOnClickListener(v -> send("cmd|hd|eject|"));
+        view.<Button>findViewById(R.id.btnHdWake)
+                .setOnClickListener(v -> send("cmd|hd|wake"));
+        view.<Button>findViewById(R.id.btnSyncNow)
                 .setOnClickListener(v -> send("cmd|sync|now"));
+        view.<Button>findViewById(R.id.btnSyncPause)
+                .setOnClickListener(v -> send("cmd|sync|pause"));
+        view.<Button>findViewById(R.id.btnSyncResume)
+                .setOnClickListener(v -> send("cmd|sync|resume"));
+    }
+
+    @Override
+    public void onTabSelected() {
+        startAutoRefresh();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (adb != null && !isHidden()) {
+            startAutoRefresh();
+        }
+    }
+
+    @Override
+    public void onPause() {
+        handler.removeCallbacks(autoRefresh);
+        super.onPause();
+    }
+
+    @Override
+    public void onHiddenChanged(boolean hidden) {
+        super.onHiddenChanged(hidden);
+        if (hidden) handler.removeCallbacks(autoRefresh);
+        else startAutoRefresh();
+    }
+
+    private void startAutoRefresh() {
+        handler.removeCallbacks(autoRefresh);
+        handler.post(autoRefresh);
+    }
+
+    private void refreshHd() {
+        if (adb == null || !adb.isConnected()) {
+            if (textHdStatus != null) {
+                textHdStatus.setText(R.string.conn_status_fail);
+            }
+            return;
+        }
+        if (refreshing) return;
+        refreshing = true;
+        File dest = new File(requireContext().getCacheDir(), "remote.state.foto.json");
+        adb.pullState(dest, (ok, msg) -> {
+            refreshing = false;
+            postUi(() -> renderState(ok, msg, dest));
+        });
+    }
+
+    private void renderState(boolean ok, String msg, File dest) {
+        if (!ok) {
+            textHdStatus.setText(msg);
+            return;
+        }
+        RemoteState state = RemoteState.parse(adb.readPulledText(dest));
+        textHdStatus.setText(state.hdLine);
+        renderSync(state.sync);
+    }
+
+    private void renderSync(@Nullable JSONObject sync) {
+        if (sync == null) {
+            textSyncSummary.setText(R.string.sync_queue_old_helper);
+            textSyncCurrent.setText("");
+            progressSync.setVisibility(View.GONE);
+            textSyncQueueEmpty.setVisibility(View.GONE);
+            listSyncQueue.removeAllViews();
+            lastQueueKey = "";
+            return;
+        }
+        boolean running = sync.optBoolean("running", false);
+        boolean paused = sync.optBoolean("paused", false);
+        int total = sync.optInt("queueTotal", 0);
+        int pending = sync.optInt("queuePending", 0);
+
+        StringBuilder head = new StringBuilder();
+        if (running) {
+            head.append("In corso · ").append(phaseLabel(sync.optString("phase", "")));
+        } else if (paused) {
+            head.append("In pausa");
+        } else {
+            head.append("Inattiva");
+        }
+        if (total > 0) {
+            head.append("\nCoda: ").append(total).append(" file · in attesa ").append(pending)
+                    .append(" (").append(formatBytes(sync.optLong("queuePendingBytes", 0))).append(")")
+                    .append(" · copiati ").append(sync.optInt("queueCopied", 0))
+                    .append(" · già presenti ").append(sync.optInt("queueSkipped", 0));
+            int failed = sync.optInt("queueFailed", 0);
+            if (failed > 0) head.append(" · errori ").append(failed);
+        }
+        long next = sync.optLong("nextAutoAt", 0);
+        if (!running && next > 0) {
+            head.append("\nProssima automatica: ").append(formatTime(next));
+        }
+        String last = sync.optString("lastSync", "");
+        if (!last.isEmpty()) head.append("\nUltima: ").append(last);
+        textSyncSummary.setText(head);
+
+        if (running) {
+            progressSync.setVisibility(View.VISIBLE);
+            progressSync.setProgress(sync.optInt("permille", 0));
+            StringBuilder cur = new StringBuilder();
+            String name = sync.optString("fileName", "");
+            int idx = sync.optInt("fileIndex", 0);
+            int tot = sync.optInt("fileTotal", 0);
+            if (!name.isEmpty() && tot > 0) {
+                cur.append(idx).append("/").append(tot).append("  ").append(name);
+                long fileSize = sync.optLong("fileSize", 0);
+                if (fileSize > 0) {
+                    cur.append("\n").append(formatBytes(sync.optLong("fileBytes", 0)))
+                            .append(" / ").append(formatBytes(fileSize));
+                }
+            } else {
+                cur.append(sync.optString("detail", ""));
+            }
+            long totalBytes = sync.optLong("totalBytes", 0);
+            if (totalBytes > 0) {
+                cur.append("\nTotale ").append(formatBytes(sync.optLong("doneBytes", 0)))
+                        .append(" / ").append(formatBytes(totalBytes));
+            }
+            long speed = sync.optLong("speedBps", 0);
+            if (speed > 0) cur.append(" · ").append(formatBytes(speed)).append("/s");
+            long eta = sync.optLong("etaMs", -1);
+            if (eta > 0) cur.append(" · fine tra ").append(formatEta(eta));
+            textSyncCurrent.setText(cur);
+        } else {
+            progressSync.setVisibility(View.GONE);
+            String detail = sync.optString("detail", "");
+            textSyncCurrent.setText(detail.equals(last) ? "" : detail);
+        }
+
+        JSONArray queue = sync.optJSONArray("queue");
+        textSyncQueueEmpty.setVisibility(total == 0 ? View.VISIBLE : View.GONE);
+        String key = sync.optLong("queueUpdatedAt", 0) + ":" + sync.optInt("queueFrom", 0)
+                + ":" + (queue == null ? 0 : queue.length());
+        if (key.equals(lastQueueKey)) return;
+        lastQueueKey = key;
+        renderQueue(queue, sync.optInt("queueFrom", 0), total);
+    }
+
+    private void renderQueue(@Nullable JSONArray queue, int from, int total) {
+        listSyncQueue.removeAllViews();
+        if (queue == null || queue.length() == 0) return;
+        if (from > 0) {
+            listSyncQueue.addView(row("… " + from + " file precedenti", R.color.vespera_muted, false));
+        }
+        for (int i = 0; i < queue.length(); i++) {
+            JSONObject item = queue.optJSONObject(i);
+            if (item == null) continue;
+            String status = item.optString("status", "pending");
+            String folder = item.optString("folder", "");
+            String text = statusIcon(status) + "  " + (folder.isEmpty() ? "" : folder + "/")
+                    + item.optString("name", "") + "  ·  " + formatBytes(item.optLong("size", 0));
+            listSyncQueue.addView(row(text, statusColor(status), "active".equals(status)));
+        }
+        int after = total - from - queue.length();
+        if (after > 0) {
+            listSyncQueue.addView(row("… altri " + after + " file", R.color.vespera_muted, false));
+        }
+    }
+
+    private TextView row(String text, int colorRes, boolean bold) {
+        TextView tv = new TextView(requireContext());
+        tv.setText(text);
+        tv.setTextColor(ContextCompat.getColor(requireContext(), colorRes));
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        tv.setTypeface(Typeface.MONOSPACE, bold ? Typeface.BOLD : Typeface.NORMAL);
+        int pad = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 2,
+                getResources().getDisplayMetrics());
+        tv.setPadding(0, pad, 0, pad);
+        return tv;
+    }
+
+    private static String statusIcon(String status) {
+        switch (status) {
+            case "active": return "▶";
+            case "copied": return "✓";
+            case "skipped": return "=";
+            case "failed": return "✗";
+            default: return "·";
+        }
+    }
+
+    private static int statusColor(String status) {
+        switch (status) {
+            case "active": return R.color.vespera_accent;
+            case "copied": return R.color.vespera_green;
+            case "skipped": return R.color.vespera_steel_blue;
+            case "failed": return R.color.vespera_rose;
+            default: return R.color.vespera_text_secondary;
+        }
+    }
+
+    private static String phaseLabel(String phase) {
+        switch (phase) {
+            case "download": return "download";
+            case "disk": return "scrittura su HD";
+            case "verify": return "verifica";
+            case "delete": return "cancellazione dal Vespera";
+            case "list": return "lettura elenco";
+            default: return phase;
+        }
+    }
+
+    private static String formatBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        double v = bytes / 1024.0;
+        String[] units = {"KB", "MB", "GB", "TB"};
+        int u = 0;
+        while (v >= 1024 && u < units.length - 1) {
+            v /= 1024;
+            u++;
+        }
+        return String.format(Locale.ITALY, v >= 100 ? "%.0f %s" : "%.1f %s", v, units[u]);
+    }
+
+    private static String formatEta(long ms) {
+        long sec = Math.max(0, (ms + 500) / 1000);
+        if (sec < 60) return sec + " s";
+        long min = sec / 60;
+        sec %= 60;
+        if (min < 60) return min + " min " + sec + " s";
+        return (min / 60) + " h " + (min % 60) + " min";
+    }
+
+    private static String formatTime(long ms) {
+        return new SimpleDateFormat("dd/MM HH:mm", Locale.ITALY).format(new Date(ms));
     }
 
     private void send(String line) {
@@ -49,6 +327,9 @@ public class FotoFragment extends Fragment {
             Toast.makeText(requireContext(),
                     ok ? "Comando inviato" : "Errore",
                     Toast.LENGTH_SHORT).show();
+            if (ok) {
+                refreshHd();
+            }
         }));
     }
 

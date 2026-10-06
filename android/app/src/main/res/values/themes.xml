@@ -39,6 +39,18 @@
         <item name="backgroundTint">@color/vespera_terracotta</item>
     </style>
 
+    <style name="Widget.Vespera.Button.Compact" parent="Widget.Vespera.Button.Slate">
+        <item name="android:minHeight">40dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:paddingLeft">8dp</item>
+        <item name="android:paddingRight">8dp</item>
+        <item name="android:paddingTop">6dp</item>
+        <item name="android:paddingBottom">6dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+    </style>
+
     <style name="Widget.Vespera.TabLayout" parent="Widget.MaterialComponents.TabLayout">
         <item name="tabBackground">@drawable/bg_tab_idle</item>
         <item name="tabSelectedTextColor">@color/white</item>
