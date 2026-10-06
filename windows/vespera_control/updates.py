@@ -11,10 +11,10 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-MEGA_FOLDER = "https://mega.nz/folder/HswU1QqC#862Zb92yZ0Upn1PXgW5EKA"
+MEGA_FOLDER = "https://mega.nz/folder/6xgAFYqY#fvY3ii_8ytQtujuGIMATmQ"
 VERSION_FILE = "vespera-control-win-version.json"
-LOCAL_VERSION = "0.2.42"
-LOCAL_CODE = 45
+LOCAL_VERSION = "0.2.44"
+LOCAL_CODE = 47
 
 
 def compare_version(left: str, right: str) -> int:
@@ -30,8 +30,8 @@ def compare_version(left: str, right: str) -> int:
 
 
 def fetch_manifest_from_share() -> dict | None:
-    """Prima prova C:\\WORK\\ESA\\Share\\pub (cartella pubblica Mega), poi solo metadati."""
-    local = Path(r"C:\WORK\ESA\Share\pub") / VERSION_FILE
+    """Prima prova C:\\WORK\\ESA\\Share\\pub\\Pubblici (cartella pubblica Mega), poi solo metadati."""
+    local = Path(r"C:\WORK\ESA\Share\pub\Pubblici") / VERSION_FILE
     if local.is_file():
         try:
             return json.loads(local.read_text(encoding="utf-8"))

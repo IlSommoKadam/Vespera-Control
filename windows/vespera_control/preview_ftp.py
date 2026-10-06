@@ -252,28 +252,63 @@ def _latest_output(ftp: ftplib.FTP, folder: str, depth: int = 0) -> tuple[str, f
     return best_path, max(best_mtime, 0.0)
 
 
-def list_objects(host: str, port: int, limit: int = 80) -> list[SkyObject]:
-    ftp = open_ftp(host, port)
+def _skip_dir(name: str) -> bool:
+    lowered = name.lower()
+    return name.startswith(".") or "dark" in lowered or "expert" in lowered
+
+
+def _looks_like_object(name: str) -> bool:
+    return bool(observation_parts(name)[0] or CATALOG.search(name))
+
+
+def _list_dirs(ftp: ftplib.FTP, folder: str) -> list[tuple[str, float]]:
     try:
         ftp.cwd("/")
-        root = _entries(ftp)
-        user = next((n for n, k, *_ in root if k == "dir" and n.lower() == "user"), "")
-        base = user or ""
-        if base:
-            ftp.cwd(base)
-            dirs = _entries(ftp)
+        for part in folder.strip("/").split("/"):
+            if part:
+                ftp.cwd(part)
+    except ftplib.Error:
+        return []
+    return [(n, mt) for n, k, mt, _sz in _entries(ftp) if k == "dir" and not _skip_dir(n)]
+
+
+def _candidate_folders(ftp: ftplib.FTP, all_roots: bool) -> list[tuple[str, str, float, str]]:
+    """(cartella, nome, mtime, gruppo): figli di USER e, con all_roots (HD), le altre cartelle in radice."""
+    root = _list_dirs(ftp, "/")
+    user = next((n for n, _mt in root if n.lower() == "user"), "")
+    if not user:
+        return [(_join(n), n, mt, "") for n, mt in root]
+    found = [(_join(user, n), n, mt, "") for n, mt in _list_dirs(ftp, _join(user))]
+    if not all_roots:
+        return found
+    for name, mtime in root:
+        if name == user:
+            continue
+        # Cartella in radice dell'HD: contenitore di osservazioni o osservazione essa stessa.
+        children = _list_dirs(ftp, _join(name))
+        if not _looks_like_object(name) and any(_looks_like_object(c) for c, _mt in children):
+            found += [(_join(name, c), c, mt, name) for c, mt in children]
         else:
-            dirs = root
+            found.append((_join(name), name, mtime, name))
+    return found
+
+
+def list_objects(host: str, port: int, limit: int = 80, all_roots: bool = False) -> list[SkyObject]:
+    """Elenco oggetti. all_roots=True (HD) include anche le cartelle fuori da USER."""
+    ftp = open_ftp(host, port)
+    try:
         objects: list[tuple[float, SkyObject]] = []
-        folders = [(n, mt) for n, k, mt, _sz in dirs if k == "dir"]
-        folders.sort(key=lambda item: (item[1], item[0]), reverse=True)
-        for name, mtime in folders[:limit]:
+        folders = _candidate_folders(ftp, all_roots)
+        folders.sort(key=lambda item: (item[2], item[1]), reverse=True)
+        for folder, name, mtime, group in folders[: limit * 2 if all_roots else limit]:
             target, when_obs = observation_parts(name)
             if not target:
                 cat = CATALOG.search(name)
                 target = cat.group(1).replace(" ", "") if cat else name
-            folder = _join(base, name) if base else f"/{name}"
             latest_path, stack_mtime = _latest_output(ftp, folder)
+            # Fuori da USER si mostrano solo cartelle con almeno un *-output.jpg.
+            if group and not latest_path:
+                continue
             signature = f"{latest_path}@{stack_mtime:.0f}" if latest_path else f"dir@{mtime or 0}"
             if stack_mtime:
                 when = _format_when(stack_mtime)
@@ -285,11 +320,14 @@ def list_objects(host: str, port: int, limit: int = 80) -> list[SkyObject]:
                 when = when_obs
                 sort_key = 0.0
             public = common_name_for(target)
+            label = f"{target} · {public}" if public else target
+            if group and group != target:
+                label = f"{label}  [{group}]"
             objects.append(
                 (
                     sort_key,
                     SkyObject(
-                        label=f"{target} · {public}" if public else target,
+                        label=label,
                         target=target,
                         public_name=public,
                         when=when,

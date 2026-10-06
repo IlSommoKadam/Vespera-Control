@@ -154,13 +154,6 @@
             android:layout_marginTop="8dp"
             android:text="@string/sync_queue_empty"
             android:textColor="@color/vespera_muted" />
-
-        <LinearLayout
-            android:id="@+id/listSyncQueue"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="vertical" />
     </LinearLayout>
     </LinearLayout>
 </ScrollView>

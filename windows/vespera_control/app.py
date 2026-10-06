@@ -589,7 +589,7 @@ class App(tk.Tk):
 
         # Coda sync foto USER → HD (Helper ≥ 0.8.37): si aggiorna da sola mentre il tab è aperto.
         queue_card = ttk.Frame(self.tab_foto, style="Card.TFrame", padding=12)
-        queue_card.pack(fill="both", expand=True, pady=(0, 10))
+        queue_card.pack(fill="x", pady=(0, 10))
         ttk.Label(queue_card, text="Coda sincronizzazione foto", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
         self.sync_summary = tk.StringVar(value="—")
         self.sync_current = tk.StringVar(value="")
@@ -598,46 +598,16 @@ class App(tk.Tk):
         self.sync_bar.pack(fill="x", pady=(8, 4))
         ttk.Label(queue_card, textvariable=self.sync_current, style="Muted.TLabel", justify="left").pack(anchor="w")
         row = ttk.Frame(queue_card, style="Card.TFrame")
-        row.pack(fill="x", pady=(8, 8))
+        row.pack(fill="x", pady=(8, 0))
         ttk.Button(row, text="Pausa", style="TButton", command=lambda: self.cmd("cmd|sync|pause")).pack(
             side="left", padx=(0, 6)
         )
         ttk.Button(row, text="Riprendi", style="Primary.TButton", command=lambda: self.cmd("cmd|sync|resume")).pack(
             side="left"
         )
-        holder = ttk.Frame(queue_card, style="Card.TFrame")
-        holder.pack(fill="both", expand=True)
-        cols = ("stato", "cartella", "file", "dim")
-        tree = ttk.Treeview(holder, columns=cols, show="headings", height=10)
-        for col, title, width, anchor in (
-            ("stato", "Stato", 110, "w"),
-            ("cartella", "Cartella", 220, "w"),
-            ("file", "File", 320, "w"),
-            ("dim", "Dimensione", 100, "e"),
-        ):
-            tree.heading(col, text=title)
-            tree.column(col, width=width, anchor=anchor, stretch=col in ("cartella", "file"))
-        tree.tag_configure("active", foreground=ACCENT, font=("Segoe UI", 9, "bold"))
-        tree.tag_configure("copied", foreground=OK)
-        tree.tag_configure("skipped", foreground=SLATE)
-        tree.tag_configure("failed", foreground=ERR)
-        tree.tag_configure("more", foreground=MUTED)
-        bar = ttk.Scrollbar(holder, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=bar.set)
-        bar.pack(side="right", fill="y")
-        tree.pack(side="left", fill="both", expand=True)
-        self.sync_tree = tree
-        self._sync_queue_key = ""
         self._foto_tick_running = False
         self.after(3000, self._foto_tick)
 
-    SYNC_STATUS = {
-        "active": "▶ in corso",
-        "pending": "· in attesa",
-        "copied": "✓ copiato",
-        "skipped": "= già su HD",
-        "failed": "✗ errore",
-    }
     SYNC_PHASE = {
         "list": "lettura elenco",
         "download": "download",
@@ -665,14 +635,12 @@ class App(tk.Tk):
         threading.Thread(target=job, daemon=True).start()
 
     def _apply_sync(self, sync) -> None:
-        if not hasattr(self, "sync_tree"):
+        if not hasattr(self, "sync_bar"):
             return
         if not isinstance(sync, dict):
             self.sync_summary.set("Coda non disponibile: aggiorna Vespera Helper (≥ 0.8.37).")
             self.sync_current.set("")
             self.sync_bar.configure(value=0)
-            self.sync_tree.delete(*self.sync_tree.get_children())
-            self._sync_queue_key = ""
             return
         running = bool(sync.get("running"))
         total = int(sync.get("queueTotal") or 0)
@@ -729,38 +697,6 @@ class App(tk.Tk):
             self.sync_bar.configure(value=1000 if sync.get("phase") == "done" else 0)
             detail = sync.get("detail") or ""
             self.sync_current.set("" if detail == last else detail)
-
-        items = sync.get("queue") or []
-        start = int(sync.get("queueFrom") or 0)
-        key = f"{sync.get('queueUpdatedAt')}:{start}:{len(items)}"
-        if key == self._sync_queue_key:
-            return
-        self._sync_queue_key = key
-        tree = self.sync_tree
-        tree.delete(*tree.get_children())
-        if start > 0:
-            tree.insert("", "end", values=("", "", f"… {start} file precedenti", ""), tags=("more",))
-        active_iid = None
-        for item in items:
-            status = item.get("status") or "pending"
-            iid = tree.insert(
-                "",
-                "end",
-                values=(
-                    self.SYNC_STATUS.get(status, status),
-                    item.get("folder") or "",
-                    item.get("name") or "",
-                    _fmt_bytes(item.get("size") or 0),
-                ),
-                tags=(status,),
-            )
-            if status == "active":
-                active_iid = iid
-        after = total - start - len(items)
-        if after > 0:
-            tree.insert("", "end", values=("", "", f"… altri {after} file", ""), tags=("more",))
-        if active_iid:
-            tree.see(active_iid)
 
     def _build_tel(self) -> None:
         card = self._card(self.tab_tel, "Comandi telescopio")
@@ -2215,7 +2151,7 @@ class App(tk.Tk):
             self.queue.put(("log", f"FTP {host}:{port} {'online' if online else 'offline'}"))
             if not online:
                 raise preview.PreviewError(f"FTP offline: {host}:{port}")
-            objects = preview.list_objects(host, port)
+            objects = preview.list_objects(host, port, all_roots=self.ftp_source.get() == "hd")
             self.queue.put(("objects", objects, f"{host}:{port}", from_tab))
 
         self.run_job(job)

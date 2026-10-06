@@ -110,25 +110,122 @@ public final class FtpPreview {
 
     private FtpPreview() {}
 
+    /** Cartella candidata: path, nome, ora cartella, gruppo (cartella in radice HD fuori da USER). */
+    private static final class Candidate {
+        final String folder;
+        final String name;
+        final long time;
+        final String group;
+
+        Candidate(String folder, String name, long time, String group) {
+            this.folder = folder;
+            this.name = name;
+            this.time = time;
+            this.group = group == null ? "" : group;
+        }
+    }
+
+    private static final Pattern CATALOG = Pattern.compile(
+            "(?i)\\b(M\\s*\\d{1,3}|NGC\\s*\\d{1,4}|IC\\s*\\d{1,4}|SH\\s*2\\s*-?\\s*\\d{1,4})\\b");
+
+    private static boolean skipDir(String name) {
+        if (name == null || name.isEmpty() || name.startsWith(".")) return true;
+        String low = name.toLowerCase(Locale.US);
+        return low.contains("dark") || low.contains("expert");
+    }
+
+    private static boolean looksLikeObject(String name) {
+        return !observationParts(name)[0].isEmpty() || CATALOG.matcher(name).find();
+    }
+
+    private static String join(String base, String name) {
+        return base.endsWith("/") ? base + name : base + "/" + name;
+    }
+
+    private static List<FTPFile> listDirs(FTPClient ftp, String path) {
+        List<FTPFile> out = new ArrayList<>();
+        try {
+            cwd(ftp, path);
+            FTPFile[] files = ftp.listFiles();
+            if (files == null) return out;
+            for (FTPFile f : files) {
+                if (f != null && f.isDirectory() && !skipDir(f.getName())) out.add(f);
+            }
+        } catch (IOException ignored) {
+        }
+        return out;
+    }
+
+    private static long timeOf(FTPFile f) {
+        return f.getTimestamp() == null ? 0L : f.getTimestamp().getTimeInMillis();
+    }
+
+    private static List<Candidate> candidateFolders(FTPClient ftp, boolean allRoots) {
+        List<Candidate> found = new ArrayList<>();
+        List<FTPFile> root = listDirs(ftp, "/");
+        FTPFile user = null;
+        for (FTPFile f : root) {
+            if ("user".equalsIgnoreCase(f.getName())) {
+                user = f;
+                break;
+            }
+        }
+        if (user == null) {
+            for (FTPFile f : root) found.add(new Candidate("/" + f.getName(), f.getName(), timeOf(f), ""));
+            return found;
+        }
+        String base = "/" + user.getName();
+        for (FTPFile f : listDirs(ftp, base)) {
+            found.add(new Candidate(join(base, f.getName()), f.getName(), timeOf(f), ""));
+        }
+        if (!allRoots) return found;
+        for (FTPFile f : root) {
+            if (f == user) continue;
+            String name = f.getName();
+            String path = "/" + name;
+            // Cartella in radice dell'HD: contenitore di osservazioni o osservazione essa stessa.
+            List<FTPFile> children = listDirs(ftp, path);
+            boolean container = false;
+            if (!looksLikeObject(name)) {
+                for (FTPFile c : children) {
+                    if (looksLikeObject(c.getName())) {
+                        container = true;
+                        break;
+                    }
+                }
+            }
+            if (container) {
+                for (FTPFile c : children) {
+                    found.add(new Candidate(join(path, c.getName()), c.getName(), timeOf(c), name));
+                }
+            } else {
+                found.add(new Candidate(path, name, timeOf(f), name));
+            }
+        }
+        return found;
+    }
+
     public static List<Item> listObjects(String host, int port) throws IOException {
+        return listObjects(host, port, false);
+    }
+
+    /** allRoots=true (HD): include anche le cartelle fuori da USER con almeno un *-output.jpg. */
+    public static List<Item> listObjects(String host, int port, boolean allRoots) throws IOException {
         FTPClient ftp = connect(host, port);
         try {
             List<Item> out = new ArrayList<>();
-            String user = findUserDir(ftp);
-            String base = user == null ? "/" : "/" + user;
-            cwd(ftp, base);
-            FTPFile[] files = ftp.listFiles();
-            if (files == null) return out;
+            List<Candidate> candidates = candidateFolders(ftp, allRoots);
+            Collections.sort(candidates, (a, b) -> Long.compare(b.time, a.time));
+            int max = allRoots ? 160 : 80;
             List<Item> scored = new ArrayList<>();
             List<Long> sortKeys = new ArrayList<>();
-            for (FTPFile f : files) {
-                if (f == null || !f.isDirectory()) continue;
-                String name = f.getName();
-                if (".".equals(name) || "..".equals(name)) continue;
+            for (Candidate c : candidates) {
+                String name = c.name;
                 String[] parts = observationParts(name);
-                String folder = base.endsWith("/") ? base + name : base + "/" + name;
+                String folder = c.folder;
                 LatestOutput latest = findLatestOutput(ftp, folder, 0);
-                long folderTime = f.getTimestamp() == null ? 0L : f.getTimestamp().getTimeInMillis();
+                if (!c.group.isEmpty() && latest == null) continue;
+                long folderTime = c.time;
                 String when;
                 long sortTime;
                 if (latest != null && latest.timeMs > 0L) {
@@ -150,12 +247,15 @@ public final class FtpPreview {
                 } else if (!when.isEmpty()) {
                     label = name + " · " + when;
                 }
+                if (!c.group.isEmpty() && !c.group.equals(name)) {
+                    label = label + "  [" + c.group + "]";
+                }
                 String signature = latest != null
                         ? latest.path + "@" + latest.timeMs
                         : "dir@" + folderTime;
                 scored.add(new Item(label, folder, signature));
                 sortKeys.add(sortTime);
-                if (scored.size() >= 80) break;
+                if (scored.size() >= max) break;
             }
             List<Integer> order = new ArrayList<>();
             for (int i = 0; i < scored.size(); i++) order.add(i);

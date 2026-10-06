@@ -1,22 +1,18 @@
 package com.vaonis.vesperacontrol.ui.foto;
 
-import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 
 import com.vaonis.vesperacontrol.AdbBridgeHolder;
@@ -25,7 +21,6 @@ import com.vaonis.vesperacontrol.RemoteState;
 import com.vaonis.vesperacontrol.adb.AdbBridge;
 import com.vaonis.vesperacontrol.ui.TabRefreshable;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
@@ -44,12 +39,10 @@ public class FotoFragment extends Fragment implements TabRefreshable {
     private TextView textSyncCurrent;
     private TextView textSyncQueueEmpty;
     private ProgressBar progressSync;
-    private LinearLayout listSyncQueue;
     private AdbBridge adb;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private volatile boolean refreshing;
-    private String lastQueueKey = "";
     private final Runnable autoRefresh = new Runnable() {
         @Override public void run() {
             if (!isResumed() || isHidden()) return;
@@ -76,7 +69,6 @@ public class FotoFragment extends Fragment implements TabRefreshable {
         textSyncCurrent = view.findViewById(R.id.textSyncCurrent);
         textSyncQueueEmpty = view.findViewById(R.id.textSyncQueueEmpty);
         progressSync = view.findViewById(R.id.progressSync);
-        listSyncQueue = view.findViewById(R.id.listSyncQueue);
 
         view.<Button>findViewById(R.id.btnHdList)
                 .setOnClickListener(v -> send("cmd|hd|list"));
@@ -157,8 +149,6 @@ public class FotoFragment extends Fragment implements TabRefreshable {
             textSyncCurrent.setText("");
             progressSync.setVisibility(View.GONE);
             textSyncQueueEmpty.setVisibility(View.GONE);
-            listSyncQueue.removeAllViews();
-            lastQueueKey = "";
             return;
         }
         boolean running = sync.optBoolean("running", false);
@@ -223,66 +213,7 @@ public class FotoFragment extends Fragment implements TabRefreshable {
             textSyncCurrent.setText(detail.equals(last) ? "" : detail);
         }
 
-        JSONArray queue = sync.optJSONArray("queue");
         textSyncQueueEmpty.setVisibility(total == 0 ? View.VISIBLE : View.GONE);
-        String key = sync.optLong("queueUpdatedAt", 0) + ":" + sync.optInt("queueFrom", 0)
-                + ":" + (queue == null ? 0 : queue.length());
-        if (key.equals(lastQueueKey)) return;
-        lastQueueKey = key;
-        renderQueue(queue, sync.optInt("queueFrom", 0), total);
-    }
-
-    private void renderQueue(@Nullable JSONArray queue, int from, int total) {
-        listSyncQueue.removeAllViews();
-        if (queue == null || queue.length() == 0) return;
-        if (from > 0) {
-            listSyncQueue.addView(row("… " + from + " file precedenti", R.color.vespera_muted, false));
-        }
-        for (int i = 0; i < queue.length(); i++) {
-            JSONObject item = queue.optJSONObject(i);
-            if (item == null) continue;
-            String status = item.optString("status", "pending");
-            String folder = item.optString("folder", "");
-            String text = statusIcon(status) + "  " + (folder.isEmpty() ? "" : folder + "/")
-                    + item.optString("name", "") + "  ·  " + formatBytes(item.optLong("size", 0));
-            listSyncQueue.addView(row(text, statusColor(status), "active".equals(status)));
-        }
-        int after = total - from - queue.length();
-        if (after > 0) {
-            listSyncQueue.addView(row("… altri " + after + " file", R.color.vespera_muted, false));
-        }
-    }
-
-    private TextView row(String text, int colorRes, boolean bold) {
-        TextView tv = new TextView(requireContext());
-        tv.setText(text);
-        tv.setTextColor(ContextCompat.getColor(requireContext(), colorRes));
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        tv.setTypeface(Typeface.MONOSPACE, bold ? Typeface.BOLD : Typeface.NORMAL);
-        int pad = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 2,
-                getResources().getDisplayMetrics());
-        tv.setPadding(0, pad, 0, pad);
-        return tv;
-    }
-
-    private static String statusIcon(String status) {
-        switch (status) {
-            case "active": return "▶";
-            case "copied": return "✓";
-            case "skipped": return "=";
-            case "failed": return "✗";
-            default: return "·";
-        }
-    }
-
-    private static int statusColor(String status) {
-        switch (status) {
-            case "active": return R.color.vespera_accent;
-            case "copied": return R.color.vespera_green;
-            case "skipped": return R.color.vespera_steel_blue;
-            case "failed": return R.color.vespera_rose;
-            default: return R.color.vespera_text_secondary;
-        }
     }
 
     private static String phaseLabel(String phase) {

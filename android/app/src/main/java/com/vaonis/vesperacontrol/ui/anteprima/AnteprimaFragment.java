@@ -173,6 +173,7 @@ public class AnteprimaFragment extends Fragment implements TabRefreshable {
         if (host == null) return;
         int port = DevicePrefs.getFtpPort(requireContext());
         String key = host + ":" + port;
+        boolean allRoots = !DevicePrefs.SOURCE_VESP.equals(DevicePrefs.getFtpSource(requireContext()));
         listing = true;
         setListStatus(getString(R.string.preview_list_updating));
         if (mode == MODE_BUTTON) {
@@ -180,7 +181,7 @@ public class AnteprimaFragment extends Fragment implements TabRefreshable {
         }
         executor.execute(() -> {
             try {
-                List<FtpPreview.Item> found = FtpPreview.listObjects(host, port);
+                List<FtpPreview.Item> found = FtpPreview.listObjects(host, port, allRoots);
                 postUi(() -> {
                     listing = false;
                     // Confronto solo con quanto già caricato dalla stessa sorgente.

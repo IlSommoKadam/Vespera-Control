@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Vespera Control</string>
     <!-- Stessa cartella pubblica di ESA Meter / StarStacKadam. Legge vesperacontrol-version.json. -->
-    <string name="mega_version_url" translatable="false">https://mega.nz/folder/HswU1QqC#862Zb92yZ0Upn1PXgW5EKA</string>
+    <string name="mega_version_url" translatable="false">https://mega.nz/folder/6xgAFYqY#fvY3ii_8ytQtujuGIMATmQ</string>
 
     <string name="tab_connessioni">Connessioni</string>
     <string name="tab_foto">Foto / Hard Disk</string>
