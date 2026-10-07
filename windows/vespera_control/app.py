@@ -607,6 +607,7 @@ class App(tk.Tk):
         )
         self._foto_tick_running = False
         self.after(3000, self._foto_tick)
+        self.after(5000, self._tel_tick)
 
     SYNC_PHASE = {
         "list": "lettura elenco",
@@ -619,7 +620,17 @@ class App(tk.Tk):
     def _foto_tick(self) -> None:
         """Rilegge remote.state.json ogni 3 s mentre il tab Foto è aperto (silenzioso)."""
         self.after(3000, self._foto_tick)
-        if self._active_tab != "foto" or self._busy or self._foto_tick_running or not self.pi_host.get().strip():
+        if self._active_tab == "foto":
+            self._silent_state_refresh()
+
+    def _tel_tick(self) -> None:
+        """Rilegge remote.state.json ogni 5 s mentre il tab Telescopio è aperto (silenzioso)."""
+        self.after(5000, self._tel_tick)
+        if self._active_tab == "tel":
+            self._silent_state_refresh()
+
+    def _silent_state_refresh(self) -> None:
+        if self._busy or self._foto_tick_running or not self.pi_host.get().strip():
             return
         self._foto_tick_running = True
 

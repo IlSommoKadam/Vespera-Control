@@ -4,6 +4,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
@@ -105,6 +107,18 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
     private boolean searchBusy;
     private final AtomicInteger visibilityGen = new AtomicInteger();
 
+    /** Rilegge lo stato del telescopio ogni 5 s mentre il tab è aperto. */
+    private static final long AUTO_REFRESH_MS = 5_000L;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private volatile boolean pulling;
+    private final Runnable autoRefresh = new Runnable() {
+        @Override public void run() {
+            if (!isResumed() || isHidden()) return;
+            pullState(false);
+            handler.postDelayed(this, AUTO_REFRESH_MS);
+        }
+    };
+
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
@@ -187,6 +201,7 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
     @Override
     public void onTabSelected() {
         refreshStatus();
+        startAutoRefresh();
     }
 
     @Override
@@ -194,7 +209,26 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         super.onResume();
         if (adb != null) {
             refreshStatus();
+            if (!isHidden()) startAutoRefresh();
         }
+    }
+
+    @Override
+    public void onPause() {
+        handler.removeCallbacks(autoRefresh);
+        super.onPause();
+    }
+
+    @Override
+    public void onHiddenChanged(boolean hidden) {
+        super.onHiddenChanged(hidden);
+        if (hidden) handler.removeCallbacks(autoRefresh);
+        else startAutoRefresh();
+    }
+
+    private void startAutoRefresh() {
+        handler.removeCallbacks(autoRefresh);
+        handler.postDelayed(autoRefresh, AUTO_REFRESH_MS);
     }
 
     @Override
@@ -209,6 +243,11 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
     private void refreshStatus() {
         refreshVisibility();
         refreshFavorites();
+        pullState(true);
+    }
+
+    /** Legge remote.state.json; {@code full} = ricalcola anche visibilità e preferiti se il sito viene dal Vespera. */
+    private void pullState(boolean full) {
         if (adb == null || !adb.isConnected()) {
             if (textTelStatus != null) {
                 textTelStatus.setText(R.string.conn_status_fail);
@@ -216,36 +255,44 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
             }
             return;
         }
+        if (pulling) return;
+        pulling = true;
         File dest = new File(requireContext().getCacheDir(), "remote.state.json");
-        adb.pullState(dest, (ok, msg) -> postUi(() -> {
-            if (!ok) {
-                textTelStatus.setText(msg);
-                textTelStatus.setVisibility(View.VISIBLE);
-                return;
-            }
-            String body = adb.readPulledText(dest);
-            lastRawState = body == null ? "" : body;
-            RemoteState state = RemoteState.parse(lastRawState);
-            textTelStatus.setText(state.telLine);
-            textTelStatus.setVisibility(state.telLine.isEmpty() ? View.GONE : View.VISIBLE);
-            textTelDetails.setText(state.telDetails);
-            try {
-                JSONObject root = new JSONObject(lastRawState);
-                lastTelescopeJson = root.optJSONObject("telescope");
-                showHelperPlan(root);
-            } catch (Exception e) {
-                lastTelescopeJson = null;
-            }
-            if (target != null) {
-                session = SkyCatalog.findSession(lastRawState, target.name, target.query);
-                showSession();
-            }
-            ObservatorySite.captureIfUnset(requireContext(), lastTelescopeJson);
-            if (DevicePrefs.SITE_VESPERA.equals(DevicePrefs.getSiteSource(requireContext()))) {
-                refreshVisibility();
-                refreshFavorites();
-            }
-        }));
+        adb.pullState(dest, (ok, msg) -> {
+            pulling = false;
+            postUi(() -> showState(ok, msg, dest, full));
+        });
+    }
+
+    private void showState(boolean ok, String msg, File dest, boolean full) {
+        if (textTelStatus == null) return;
+        if (!ok) {
+            textTelStatus.setText(msg);
+            textTelStatus.setVisibility(View.VISIBLE);
+            return;
+        }
+        String body = adb.readPulledText(dest);
+        lastRawState = body == null ? "" : body;
+        RemoteState state = RemoteState.parse(lastRawState);
+        textTelStatus.setText(state.telLine);
+        textTelStatus.setVisibility(state.telLine.isEmpty() ? View.GONE : View.VISIBLE);
+        textTelDetails.setText(state.telDetails);
+        try {
+            JSONObject root = new JSONObject(lastRawState);
+            lastTelescopeJson = root.optJSONObject("telescope");
+            showHelperPlan(root);
+        } catch (Exception e) {
+            lastTelescopeJson = null;
+        }
+        if (target != null) {
+            session = SkyCatalog.findSession(lastRawState, target.name, target.query);
+            showSession();
+        }
+        ObservatorySite.captureIfUnset(requireContext(), lastTelescopeJson);
+        if (full && DevicePrefs.SITE_VESPERA.equals(DevicePrefs.getSiteSource(requireContext()))) {
+            refreshVisibility();
+            refreshFavorites();
+        }
     }
 
     private void searchTarget() {
