@@ -80,10 +80,17 @@ public final class AppUpdates {
         }
     }
 
+    /** Vecchio link pubblico (tutta Share\pub, con copie stantie): sostituito dal link nell'APK. */
+    private static final String OLD_FOLDER_ID = "HswU1QqC";
+
     public static String versionUrl(Context context) {
         String saved = prefs(context).getString(KEY_URL, "").trim();
-        if (MegaPublic.isPublicLink(saved)) return saved;
         String bundled = context.getString(R.string.mega_version_url).trim();
+        if (saved.contains(OLD_FOLDER_ID) && MegaPublic.isPublicLink(bundled)) {
+            prefs(context).edit().putString(KEY_URL, bundled).remove(KEY_APK_URL).apply();
+            return bundled;
+        }
+        if (MegaPublic.isPublicLink(saved)) return saved;
         if (MegaPublic.isPublicLink(bundled)) {
             prefs(context).edit().putString(KEY_URL, bundled).apply();
             return bundled;
