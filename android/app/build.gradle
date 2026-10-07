@@ -16,8 +16,8 @@ android {
         applicationId "com.vaonis.vesperacontrol"
         minSdk 29
         targetSdk 35
-        versionCode 49
-        versionName "0.2.46"
+        versionCode 50
+        versionName "0.2.47"
     }
 
     signingConfigs {

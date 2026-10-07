@@ -13,8 +13,8 @@ from pathlib import Path
 
 MEGA_FOLDER = "https://mega.nz/folder/6xgAFYqY#fvY3ii_8ytQtujuGIMATmQ"
 VERSION_FILE = "vespera-control-win-version.json"
-LOCAL_VERSION = "0.2.46"
-LOCAL_CODE = 49
+LOCAL_VERSION = "0.2.47"
+LOCAL_CODE = 50
 
 
 def compare_version(left: str, right: str) -> int:
@@ -34,7 +34,7 @@ def fetch_manifest_from_share() -> dict | None:
     local = Path(r"C:\WORK\ESA\Share\pub\Pubblici") / VERSION_FILE
     if local.is_file():
         try:
-            return json.loads(local.read_text(encoding="utf-8"))
+            return json.loads(local.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
             pass
     return None
