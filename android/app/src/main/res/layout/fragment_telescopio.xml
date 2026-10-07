@@ -85,6 +85,53 @@
             android:text="@string/btn_shutdown" />
 
         <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Ruota solo azimut (test cavo)"
+            android:textColor="@color/vespera_muted" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/editAzStep"
+                android:layout_width="72dp"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:hint="°"
+                android:importantForAutofill="no"
+                android:inputType="numberDecimal"
+                android:text="5" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="°" />
+
+            <Button
+                android:id="@+id/btnAzMinus"
+                style="@style/Widget.Vespera.Button.Primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="⟲ AZ −" />
+
+            <Button
+                android:id="@+id/btnAzPlus"
+                style="@style/Widget.Vespera.Button.Primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="AZ + ⟳" />
+        </LinearLayout>
+
+        <TextView
             android:id="@+id/textTelescopioLog"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

@@ -30,11 +30,16 @@ cmd|singularity|restart|start|check
 cmd|hd|list|mount|<spec>|unmount|eject|<spec>|wake|status
 cmd|sync|now|resume|pause
 cmd|telescope|park|stop|resume|init|shutdown|observe|{json}|observeResume|{storeId}
+cmd|telescope|azRelative|<gradi>
 cmd|plan|load|{json}
 cmd|plan|cancel
 ```
 
 `init` e `resume` possono portare la posizione: `cmd|telescope|init|{"lat":41.0,"lon":16.86}` (Helper â‰¥ 0.8.26; senza, l'Helper usa la posizione di Sistema, poi API Vespera e status). I client chiedono conferma con popup prima di ogni comando telescopio e mostrano l'esito in un popup.
+
+### Rotazione solo azimut (Helper ≥ 0.8.44)
+
+`cmd|telescope|azRelative|<gradi>` (±0,1…90) ruota solo il motore AZ con la route firmware `POST /v1/motors/goRelative`, body `{"AZ":<gradi>}` (firmato come park/init). Il firmware blocca solo la risorsa AZ e rifiuta se l'asse non è calibrato o è occupato. L'ack riporta la riga motori prima/dopo: `OK|telescope|azRelative|200|AZ +5.0° | prima: … | dopo: … | <risposta>`. Serve per i test dello srotolamento del cavo di alimentazione.
 
 ### Piano della notte (Helper â‰¥ 0.8.23)
 

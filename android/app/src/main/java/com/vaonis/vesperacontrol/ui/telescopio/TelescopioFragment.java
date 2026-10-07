@@ -180,6 +180,9 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
                 .setOnClickListener(v -> confirmTelescope("resume"));
         view.<Button>findViewById(R.id.btnShutdown)
                 .setOnClickListener(v -> confirmTelescope("shutdown"));
+        editAzStep = view.findViewById(R.id.editAzStep);
+        view.<Button>findViewById(R.id.btnAzMinus).setOnClickListener(v -> confirmAzRotate(-1));
+        view.<Button>findViewById(R.id.btnAzPlus).setOnClickListener(v -> confirmAzRotate(1));
 
         btnSearch.setOnClickListener(v -> searchTarget());
         editQuery.setOnEditorActionListener((v, actionId, event) -> {
@@ -1258,6 +1261,48 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         b.show();
     }
 
+    private android.widget.EditText editAzStep;
+
+    /** Ruota solo il motore azimutale di ±N gradi (cmd|telescope|azRelative). */
+    private void confirmAzRotate(int sign) {
+        if (!isAdded()) return;
+        double deg;
+        try {
+            deg = Double.parseDouble(editAzStep.getText().toString().trim().replace(',', '.'));
+        } catch (NumberFormatException e) {
+            deg = 0;
+        }
+        if (!(deg > 0 && deg <= 90)) {
+            new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                    .setTitle("Ruota AZ")
+                    .setMessage("Angolo non valido: usa da 0,1° a 90°.")
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+            return;
+        }
+        if (telescopeBusy) {
+            new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                    .setTitle("Comando telescopio")
+                    .setMessage("C'è già un comando telescopio in corso: aspetta che finisca e riprova.")
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+            return;
+        }
+        double signed = sign >= 0 ? deg : -deg;
+        String arg = String.format(Locale.US, "%.2f", signed);
+        new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                .setTitle("Conferma: Ruota AZ")
+                .setMessage(String.format(Locale.ITALY,
+                        "Ruota solo il motore azimutale di %+.1f°.\n"
+                                + "Annota il verso reale (orario/antiorario visto dall'alto) per lo srotolamento automatico.\n\n"
+                                + "Il telescopio si muove davvero: controlla che nulla ostacoli la rotazione.\n\n"
+                                + "Inviare il comando al telescopio?", signed))
+                .setIcon(android.R.drawable.ic_dialog_alert)
+                .setNegativeButton("Annulla", null)
+                .setPositiveButton("Ruota AZ", (d, w) -> sendTelescope("azRelative|" + arg, "Ruota AZ"))
+                .show();
+    }
+
     private void sendTelescope(String action, String label) {
         String line = "cmd|telescope|" + action;
         if (("init".equals(action) || "resume".equals(action))
@@ -1270,7 +1315,8 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
             } catch (Exception ignored) {
             }
         }
-        long wait = ("init".equals(action) || "resume".equals(action)) ? 150_000L : 45_000L;
+        long wait = ("init".equals(action) || "resume".equals(action)) ? 150_000L
+                : action.startsWith("azRelative") ? 240_000L : 45_000L;
         telescopeBusy = true;
         textLog.setText("Invio " + label + "…");
         adb.sendLine(line, wait, (ok, msg) -> postUi(() -> {
@@ -1299,6 +1345,12 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
             hint = "Il Vespera non accetta i comandi firmati dall'Helper (autenticazione).";
         } else if (low.contains("init_not_ready")) {
             hint = "L'inizializzazione non è ancora finita: riprova tra poco.";
+        } else if (low.contains("unknown|azrelative")) {
+            hint = "Vespera Helper sul Pi troppo vecchio: aggiornalo (≥ 0.8.44) per ruotare l'azimut.";
+        } else if (low.contains("angle_too_large") || low.contains("invalid_angle")) {
+            hint = "Angolo non valido: usa da 0,1° a 90° per comando.";
+        } else if (low.contains("not_calibrated")) {
+            hint = "Il motore azimutale non è calibrato: fai prima l'Init.";
         } else if (low.contains("nessuna risposta")) {
             hint = "Nessuna risposta dall'Helper sul Pi: è avviato? (tab Connessioni → Aggiorna stato).";
         } else {

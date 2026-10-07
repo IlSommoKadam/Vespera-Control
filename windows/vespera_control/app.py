@@ -119,6 +119,7 @@ TEL_ACTIONS = {
     "stop": ("Stop", "Ferma l'osservazione in corso. Lo stacking si interrompe.", True),
     "resume": ("Riprendi", "Riprende l'osservazione dell'ultimo oggetto (fa l'Init se serve).", False),
     "shutdown": ("Shutdown", "Spegne il telescopio. Per riaccenderlo serve il pulsante fisico.", True),
+    "azRelative": ("Ruota AZ", "Ruota solo il motore azimutale del Vespera (test srotolamento cavo).", True),
 }
 
 
@@ -135,6 +136,12 @@ def tel_error_text(ack: str) -> str:
         hint = "Il Vespera non accetta i comandi firmati dall'Helper (autenticazione)."
     elif "init_not_ready" in low:
         hint = "L'inizializzazione non è ancora finita: riprova tra poco."
+    elif "azrelative|unknown" in low or "unknown|azrelative" in low:
+        hint = "Vespera Helper sul Pi troppo vecchio: aggiornalo (≥ 0.8.44) per ruotare l'azimut."
+    elif "angle_too_large" in low or "invalid_angle" in low:
+        hint = "Angolo non valido: usa da 0,1° a 90° per comando."
+    elif "not_calibrated" in low:
+        hint = "Il motore azimutale non è calibrato: fai prima l'Init."
     elif "nessun ack" in low or "helper avviato" in low:
         hint = "Nessuna risposta dall'Helper sul Pi: è avviato? (tab Connessioni → Aggiorna stato)."
     else:
@@ -737,6 +744,15 @@ class App(tk.Tk):
                 style=style,
                 command=lambda a=action: self.tel_command(a),
             ).pack(side="left", padx=(0, 6))
+        az_row = ttk.Frame(card, style="Card.TFrame")
+        az_row.pack(fill="x", pady=(10, 0))
+        ttk.Label(az_row, text="Ruota solo azimut (test cavo):", style="Card.TLabel").pack(side="left", padx=(0, 6))
+        self.az_step = tk.StringVar(value="5")
+        ttk.Spinbox(az_row, from_=0.5, to=90, increment=0.5, width=6,
+                    textvariable=self.az_step).pack(side="left")
+        ttk.Label(az_row, text="°", style="Card.TLabel").pack(side="left", padx=(2, 8))
+        ttk.Button(az_row, text="⟲ AZ −", command=lambda: self.az_rotate(-1)).pack(side="left", padx=(0, 6))
+        ttk.Button(az_row, text="AZ + ⟳", command=lambda: self.az_rotate(1)).pack(side="left")
         ttk.Label(card, text="Stato dettagliato (Helper)", style="Section.TLabel").pack(anchor="w", pady=(12, 4))
         self.tel_details_frame = ttk.Frame(card, style="Card.TFrame")
         self.tel_details_frame.pack(fill="x")
@@ -1916,6 +1932,37 @@ class App(tk.Tk):
                 line += "|" + json.dumps({"lat": round(site[0], 6), "lon": round(site[1], 6)},
                                          separators=(",", ":"))
         self.cmd(line, wait=150 if action in {"init", "resume"} else 45)
+
+    def az_rotate(self, sign: int) -> None:
+        """Ruota solo il motore azimutale di ±N gradi (cmd|telescope|azRelative)."""
+        try:
+            deg = float(self.az_step.get().replace(",", "."))
+        except ValueError:
+            deg = 0.0
+        if not 0 < deg <= 90:
+            messagebox.showerror("Ruota AZ", "Angolo non valido: usa da 0,1° a 90°.", parent=self)
+            return
+        if self._busy:
+            messagebox.showwarning(
+                "Comando telescopio",
+                "C'è già un'operazione in corso: aspetta che finisca e riprova.",
+                parent=self,
+            )
+            return
+        deg *= 1 if sign >= 0 else -1
+        if not messagebox.askokcancel(
+            "Conferma: Ruota AZ",
+            f"Ruota solo il motore azimutale di {deg:+.1f}°.\n"
+            "Annota il verso reale (orario/antiorario visto dall'alto) per lo srotolamento automatico.\n\n"
+            "Il telescopio si muove davvero: controlla che nulla ostacoli la rotazione.\n\n"
+            "Inviare il comando al telescopio?",
+            icon="warning",
+            default="cancel",
+            parent=self,
+        ):
+            self.set_status("Ruota AZ: annullato.", "info")
+            return
+        self.cmd(f"cmd|telescope|azRelative|{deg:.2f}", wait=240)
 
     def _tel_result(self, action: str, ok: bool, ack: str) -> None:
         label = TEL_ACTIONS.get(action, (action,))[0]
