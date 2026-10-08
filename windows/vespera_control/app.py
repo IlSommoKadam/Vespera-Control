@@ -123,6 +123,28 @@ TEL_ACTIONS = {
 }
 
 
+def tel_actions_allowed(tel: dict) -> dict:
+    """Comandi eseguibili ora, dallo stato del telescopio (stesse regole del pannello Helper).
+
+    Telescopio non raggiungibile o in spegnimento: nessun comando. I campi assenti
+    (Helper vecchi) non bloccano nulla.
+    """
+    if not tel.get("reachable") or tel.get("isShuttingDown"):
+        return {}
+    observing = bool(tel.get("isObserving", tel.get("observationStatus") == "RUNNING"))
+    tracking = tel.get("tracking") in ("ON", "STARTING")
+    auto_init = bool(tel.get("isAutoInitRunning"))
+    moving = observing or tracking or auto_init
+    return {
+        "init": not tel.get("initialized") and not moving,
+        "park": tel.get("arm") != "CLOSED",
+        "stop": moving or "isObserving" not in tel,
+        "resume": not moving and tel.get("canResumeObservation", True) is not False,
+        "shutdown": True,
+        "azRelative": not moving,
+    }
+
+
 def tel_error_text(ack: str) -> str:
     """Spiega in italiano gli errori più comuni dei comandi telescopio."""
     low = (ack or "").lower()
@@ -339,7 +361,8 @@ class App(tk.Tk):
             darkcolor=PANEL_STROKE,
         )
         style.configure("TButton", background=SLATE, foreground="#ffffff", padding=(10, 7))
-        style.map("TButton", background=[("active", "#5A8499"), ("disabled", STEEL)])
+        style.map("TButton", background=[("active", "#5A8499"), ("disabled", STEEL)],
+                  foreground=[("disabled", "#E4E9ED")])
         style.configure(
             "Primary.TButton",
             background=PRIMARY,
@@ -347,11 +370,14 @@ class App(tk.Tk):
             padding=(10, 9),
             font=("Segoe UI", 10, "bold"),
         )
-        style.map("Primary.TButton", background=[("active", "#4A9968"), ("disabled", STEEL)])
+        style.map("Primary.TButton", background=[("active", "#4A9968"), ("disabled", STEEL)],
+                  foreground=[("disabled", "#E4E9ED")])
         style.configure("Danger.TButton", background=ERR, foreground="#ffffff", padding=(10, 7))
-        style.map("Danger.TButton", background=[("active", "#C46A6A"), ("disabled", STEEL)])
+        style.map("Danger.TButton", background=[("active", "#C46A6A"), ("disabled", STEEL)],
+                  foreground=[("disabled", "#E4E9ED")])
         style.configure("Warn.TButton", background=WARN, foreground="#ffffff", padding=(10, 7))
-        style.map("Warn.TButton", background=[("active", "#D08A62"), ("disabled", STEEL)])
+        style.map("Warn.TButton", background=[("active", "#D08A62"), ("disabled", STEEL)],
+                  foreground=[("disabled", "#E4E9ED")])
         style.configure("TCheckbutton", background=PANEL, foreground=FG)
         style.map("TCheckbutton", background=[("active", PANEL)])
         style.configure("TRadiobutton", background=BG, foreground=FG)
@@ -723,6 +749,7 @@ class App(tk.Tk):
         row = ttk.Frame(card, style="Card.TFrame")
         row.pack(fill="x", pady=(10, 0))
         self._tel_buttons_row = row
+        self._tel_btns: dict[str, ttk.Button] = {}
         for label, action in (
             ("Init", "init"),
             ("Park", "park"),
@@ -738,12 +765,14 @@ class App(tk.Tk):
                 style = "Warn.TButton"
             else:
                 style = "TButton"
-            ttk.Button(
+            btn = ttk.Button(
                 row,
                 text=label,
                 style=style,
                 command=lambda a=action: self.tel_command(a),
-            ).pack(side="left", padx=(0, 6))
+            )
+            btn.pack(side="left", padx=(0, 6))
+            self._tel_btns[action] = btn
         az_row = ttk.Frame(card, style="Card.TFrame")
         az_row.pack(fill="x", pady=(10, 0))
         ttk.Label(az_row, text="Ruota solo azimut (test cavo):", style="Card.TLabel").pack(side="left", padx=(0, 6))
@@ -751,8 +780,11 @@ class App(tk.Tk):
         ttk.Spinbox(az_row, from_=0.5, to=90, increment=0.5, width=6,
                     textvariable=self.az_step).pack(side="left")
         ttk.Label(az_row, text="°", style="Card.TLabel").pack(side="left", padx=(2, 8))
-        ttk.Button(az_row, text="⟲ AZ −", command=lambda: self.az_rotate(-1)).pack(side="left", padx=(0, 6))
-        ttk.Button(az_row, text="AZ + ⟳", command=lambda: self.az_rotate(1)).pack(side="left")
+        self._tel_btns["azMinus"] = ttk.Button(az_row, text="⟲ AZ −", command=lambda: self.az_rotate(-1))
+        self._tel_btns["azMinus"].pack(side="left", padx=(0, 6))
+        self._tel_btns["azPlus"] = ttk.Button(az_row, text="AZ + ⟳", command=lambda: self.az_rotate(1))
+        self._tel_btns["azPlus"].pack(side="left")
+        self._update_tel_buttons({})
         ttk.Label(card, text="Stato dettagliato (Helper)", style="Section.TLabel").pack(anchor="w", pady=(12, 4))
         self.tel_details_frame = ttk.Frame(card, style="Card.TFrame")
         self.tel_details_frame.pack(fill="x")
@@ -1964,6 +1996,15 @@ class App(tk.Tk):
             return
         self.cmd(f"cmd|telescope|azRelative|{deg:.2f}", wait=240)
 
+    def _update_tel_buttons(self, tel: dict) -> None:
+        """Disabilita (in grigio) i comandi che il telescopio ora non può eseguire."""
+        if not hasattr(self, "_tel_btns"):
+            return
+        allowed = tel_actions_allowed(tel)
+        for key, btn in self._tel_btns.items():
+            action = "azRelative" if key.startswith("az") else key
+            btn.state(["!disabled"] if allowed.get(action) else ["disabled"])
+
     def _tel_result(self, action: str, ok: bool, ack: str) -> None:
         label = TEL_ACTIONS.get(action, (action,))[0]
         if ok:
@@ -2103,6 +2144,7 @@ class App(tk.Tk):
             else:
                 self.tel_status_label.pack_forget()
         self._render_tel_details(tel_rows)
+        self._update_tel_buttons(tel)
         space = hd.get("spaceLabel") or (f"{hd.get('spacePercent')}%" if hd.get("spaceKnown") else "")
         self.hd_status.set(
             f"{'Montato' if hd.get('mounted') else 'Spento/smontato'}  ·  {hd.get('label') or hd.get('uuid') or '—'}  ·  {space}"

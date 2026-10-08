@@ -170,19 +170,16 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         view.<Button>findViewById(R.id.btnFavPrev).setOnClickListener(v -> shiftNight(-1));
         view.<Button>findViewById(R.id.btnFavNext).setOnClickListener(v -> shiftNight(1));
 
-        view.<Button>findViewById(R.id.btnUnpark)
-                .setOnClickListener(v -> confirmTelescope("init"));
-        view.<Button>findViewById(R.id.btnPark)
-                .setOnClickListener(v -> confirmTelescope("park"));
-        view.<Button>findViewById(R.id.btnAbort)
-                .setOnClickListener(v -> confirmTelescope("stop"));
-        view.<Button>findViewById(R.id.btnGoto)
-                .setOnClickListener(v -> confirmTelescope("resume"));
-        view.<Button>findViewById(R.id.btnShutdown)
-                .setOnClickListener(v -> confirmTelescope("shutdown"));
+        telButtons.clear();
+        bindTelButton(view, R.id.btnUnpark, "init", v -> confirmTelescope("init"));
+        bindTelButton(view, R.id.btnPark, "park", v -> confirmTelescope("park"));
+        bindTelButton(view, R.id.btnAbort, "stop", v -> confirmTelescope("stop"));
+        bindTelButton(view, R.id.btnGoto, "resume", v -> confirmTelescope("resume"));
+        bindTelButton(view, R.id.btnShutdown, "shutdown", v -> confirmTelescope("shutdown"));
         editAzStep = view.findViewById(R.id.editAzStep);
-        view.<Button>findViewById(R.id.btnAzMinus).setOnClickListener(v -> confirmAzRotate(-1));
-        view.<Button>findViewById(R.id.btnAzPlus).setOnClickListener(v -> confirmAzRotate(1));
+        bindTelButton(view, R.id.btnAzMinus, "azRelative", v -> confirmAzRotate(-1));
+        bindTelButton(view, R.id.btnAzPlus, "azRelative", v -> confirmAzRotate(1));
+        updateTelButtons();
 
         btnSearch.setOnClickListener(v -> searchTarget());
         editQuery.setOnEditorActionListener((v, actionId, event) -> {
@@ -256,6 +253,8 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
                 textTelStatus.setText(R.string.conn_status_fail);
                 textTelStatus.setVisibility(View.VISIBLE);
             }
+            lastTelescopeJson = null;
+            updateTelButtons();
             return;
         }
         if (pulling) return;
@@ -272,6 +271,8 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         if (!ok) {
             textTelStatus.setText(msg);
             textTelStatus.setVisibility(View.VISIBLE);
+            lastTelescopeJson = null;
+            updateTelButtons();
             return;
         }
         String body = adb.readPulledText(dest);
@@ -287,6 +288,7 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         } catch (Exception e) {
             lastTelescopeJson = null;
         }
+        updateTelButtons();
         if (target != null) {
             session = SkyCatalog.findSession(lastRawState, target.name, target.query);
             showSession();
@@ -1239,6 +1241,54 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
 
     private boolean telescopeBusy;
 
+    /** Pulsanti comando con l'azione che inviano e il colore originale (per riattivarli). */
+    private final List<Object[]> telButtons = new ArrayList<>();
+
+    private void bindTelButton(View root, int id, String action, View.OnClickListener click) {
+        Button b = root.findViewById(id);
+        b.setOnClickListener(click);
+        telButtons.add(new Object[] {b, action, b.getBackgroundTintList(), b.getTextColors()});
+    }
+
+    /**
+     * Comandi eseguibili ora, dallo stato del telescopio (stesse regole del pannello Helper e di Windows).
+     * Non raggiungibile o in spegnimento: nessun comando. I campi assenti (Helper vecchi) non bloccano.
+     */
+    static Set<String> allowedTelActions(@Nullable JSONObject tel) {
+        Set<String> out = new HashSet<>();
+        if (tel == null || !tel.optBoolean("reachable") || tel.optBoolean("isShuttingDown")) return out;
+        boolean observing = tel.has("isObserving")
+                ? tel.optBoolean("isObserving")
+                : "RUNNING".equals(tel.optString("observationStatus"));
+        String tracking = tel.optString("tracking");
+        boolean moving = observing || "ON".equals(tracking) || "STARTING".equals(tracking)
+                || tel.optBoolean("isAutoInitRunning");
+        if (!tel.optBoolean("initialized") && !moving) out.add("init");
+        if (!"CLOSED".equals(tel.optString("arm"))) out.add("park");
+        if (moving || !tel.has("isObserving")) out.add("stop");
+        if (!moving && tel.optBoolean("canResumeObservation", true)) out.add("resume");
+        out.add("shutdown");
+        if (!moving) out.add("azRelative");
+        return out;
+    }
+
+    /** Disattiva e colora in grigio i comandi non eseguibili; tutti spenti mentre un comando è in corso. */
+    private void updateTelButtons() {
+        if (!isAdded()) return;
+        Set<String> allowed = telescopeBusy ? new HashSet<>() : allowedTelActions(lastTelescopeJson);
+        android.content.res.ColorStateList grey = android.content.res.ColorStateList.valueOf(
+                getResources().getColor(R.color.vespera_steel, null));
+        android.content.res.ColorStateList greyText = android.content.res.ColorStateList.valueOf(0xFFDDE3E8);
+        for (Object[] t : telButtons) {
+            Button b = (Button) t[0];
+            boolean on = allowed.contains((String) t[1]);
+            b.setEnabled(on);
+            b.setBackgroundTintList(on ? (android.content.res.ColorStateList) t[2] : grey);
+            b.setTextColor(on ? (android.content.res.ColorStateList) t[3] : greyText);
+            b.setAlpha(on ? 1f : 0.7f);
+        }
+    }
+
     private void confirmTelescope(String action) {
         String[] info = telescopeAction(action);
         if (info == null || !isAdded()) return;
@@ -1318,9 +1368,11 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         long wait = ("init".equals(action) || "resume".equals(action)) ? 150_000L
                 : action.startsWith("azRelative") ? 240_000L : 45_000L;
         telescopeBusy = true;
+        updateTelButtons();
         textLog.setText("Invio " + label + "…");
         adb.sendLine(line, wait, (ok, msg) -> postUi(() -> {
             telescopeBusy = false;
+            updateTelButtons();
             textLog.setText(msg);
             new androidx.appcompat.app.AlertDialog.Builder(requireContext())
                     .setTitle(ok ? label : label + ": non riuscito")
