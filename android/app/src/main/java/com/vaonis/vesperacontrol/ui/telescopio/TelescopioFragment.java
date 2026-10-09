@@ -1092,6 +1092,25 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
             String st = readablePlanError(s.optString("status", ""));
             if (st.startsWith("errore")) sb.append("\n      ⚠ ").append(st);
             else if (!st.isEmpty()) sb.append(" · ").append(st);
+            long tracked = s.optLong("trackedMs");
+            if (tracked >= 60_000L) sb.append(" · tracking ").append(minutes(tracked));
+        }
+        // Tracking reale misurato dall'Helper (≥ 0.8.47): per oggetto somma dei suoi passi, poi il piano
+        java.util.LinkedHashMap<String, Long> byName = new java.util.LinkedHashMap<>();
+        long all = 0;
+        for (int i = 0; i < steps.length(); i++) {
+            JSONObject s = steps.optJSONObject(i);
+            if (s == null) continue;
+            Long sum = byName.get(s.optString("name"));
+            byName.put(s.optString("name"), (sum == null ? 0 : sum) + s.optLong("trackedMs"));
+            all += s.optLong("trackedMs");
+        }
+        if (all >= 60_000L) {
+            sb.append("\nTracking reale (somma dei passi):");
+            for (java.util.Map.Entry<String, Long> e : byName.entrySet()) {
+                sb.append("\n   ").append(e.getKey()).append(" · ").append(minutes(e.getValue()));
+            }
+            sb.append("\n   Totale piano ").append(minutes(all));
         }
         JSONArray totals = plan.optJSONArray("totals");
         if (totals != null && totals.length() > 0) {
@@ -1100,6 +1119,13 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         }
         textPlanHelper.setText(sb);
         btnPlanCancel.setVisibility(plan.optBoolean("active") ? View.VISIBLE : View.GONE);
+    }
+
+    /** "40 min", "1h20" (come l'Helper). */
+    static String minutes(long ms) {
+        long m = Math.round(ms / 60000.0);
+        if (m < 60) return m + " min";
+        return m % 60 == 0 ? (m / 60) + "h" : String.format(java.util.Locale.ITALY, "%dh%02d", m / 60, m % 60);
     }
 
     /** Sostituisce il JSON d'errore del firmware (Helper < 0.8.31) con una frase leggibile. */

@@ -1679,10 +1679,22 @@ class App(tk.Tk):
             t0 = datetime.fromtimestamp(int(s.get("start") or 0) / 1000)
             t1 = datetime.fromtimestamp(int(s.get("end") or 0) / 1000)
             st = self._readable_plan_error(s.get("status") or "")
+            tracked = int(s.get("trackedMs") or 0)
             out.append(f"{'▶ ' if i == cur else '   '}{t0:%H:%M}–{t1:%H:%M}  {s.get('name')}"
-                       + (f" · {st}" if st and not st.startswith("errore") else ""))
+                       + (f" · {st}" if st and not st.startswith("errore") else "")
+                       + (f" · tracking {self._minutes(tracked)}" if tracked >= 60_000 else ""))
             if st.startswith("errore"):
                 out.append(f"      ⚠ {st}")
+        # Tracking reale misurato dall'Helper (≥ 0.8.47): per oggetto somma dei suoi passi, poi il piano
+        by_name: dict[str, int] = {}
+        for s in steps:
+            name = str(s.get("name"))
+            by_name[name] = by_name.get(name, 0) + int(s.get("trackedMs") or 0)
+        total = sum(by_name.values())
+        if total >= 60_000:
+            out.append("Tracking reale (somma dei passi):")
+            out.extend(f"   {name} · {self._minutes(ms)}" for name, ms in by_name.items())
+            out.append(f"   Totale piano {self._minutes(total)}")
         totals = plan.get("totals") or []
         if totals:
             out.append("Tempo per oggetto:")
@@ -1707,6 +1719,14 @@ class App(tk.Tk):
             m = re.search(r'"name"\s*:\s*"([^"]+)"', raw)
             detail = "firmware " + (m.group(1) if m else "rifiuta il comando")
         return prefix + detail.strip()
+
+    @staticmethod
+    def _minutes(ms: int) -> str:
+        """Durata come l'Helper: «40 min», «1h20»."""
+        m = round(ms / 60000)
+        if m < 60:
+            return f"{m} min"
+        return f"{m // 60}h" if m % 60 == 0 else f"{m // 60}h{m % 60:02d}"
 
     @staticmethod
     def _fit_text(text: tk.Text, limit: int) -> None:

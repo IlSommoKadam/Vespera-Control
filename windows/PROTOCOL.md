@@ -52,6 +52,15 @@ a fine piano park se `parkAtEnd`. Stato in `remote.state.json` â†’ `plan`:
 `{active, title, night, done, message, current, steps:[{name,start,end,status}]}`.
 `telescope.captureStore` riporta le sessioni multi-notte per i client.
 
+### Tempo di tracking reale (Helper ≥ 0.8.47)
+
+L'Helper campiona lo stato del Vespera (~ogni 20 s) e conta il tempo in tracking sullo stesso oggetto
+(buchi oltre 10 min non contati). `telescope.trackingClock` = `{target, since, runMs, tonightMs}` mentre traccia
+(`runMs` = tracking continuo in corso, `tonightMs` = somma della notte su quell'oggetto, notte dalle 12 alle 12).
+Nel piano ogni passo ha `trackedMs` (tempo tracciato su quell'oggetto nel suo orario, o dopo se sfora) e
+`plan.trackedMs` è il totale. Righe `details` «Tempo tracking» e «Tempo piano»; i client sommano `trackedMs`
+per oggetto (più passi dello stesso oggetto) e mostrano il totale del piano.
+
 ### Stato dettagliato telescopio (Helper â‰¥ 0.8.36)
 
 `telescope.details` = `[{"label","value"}, â€¦]`: le stesse righe del pannello Telescopio â€º Stato dell'Helper
