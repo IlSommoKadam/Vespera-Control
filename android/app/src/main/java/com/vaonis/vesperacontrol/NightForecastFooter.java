@@ -3,11 +3,13 @@ package com.vaonis.vesperacontrol;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -29,8 +31,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Footer meteo dell'app, come NightForecastFooter di Vespera Helper: una riga con
- * ‹ giorno ›, fasce di 3 h dal tramonto all'alba (Open-Meteo) e bandiera + 📍 luogo.
+ * Footer meteo dell'app (stessi dati di NightForecastFooter di Vespera Helper).
+ * Chiuso: riquadro con la prima previsione della sera e ▲, a destra il nome del paese.
+ * Un tap sul riquadro apre sopra il footer una barra sovrapposta con l'evoluzione della notte
+ * (‹ giorno ›, fasce di 3 h fino all'alba); un altro tap (o Indietro) la chiude.
  */
 final class NightForecastFooter {
     private static final long REFRESH_MS = 30 * 60 * 1000L;
@@ -38,6 +42,10 @@ final class NightForecastFooter {
     /** Default di PhotoSyncStore dell'Helper (dayEndHour / dayStartHour). */
     private static final int DEFAULT_NIGHT_START = 19;
     private static final int DEFAULT_NIGHT_END = 10;
+    private static final int TEXT = 0xFF37474F;
+    private static final int RAIN = 0xFF1565C0;
+    private static final int NAV_ON = 0xFF1565C0;
+    private static final int NAV_OFF = 0xFFB0BEC5;
 
     private static final class Slot {
         final long epochMs;
@@ -65,13 +73,15 @@ final class NightForecastFooter {
     private final Context app;
     private final float density;
     private final LinearLayout root;
+    private final ImageView boxIcon;
+    private final TextView boxText;
+    private final TextView boxArrow;
+    private final TextView placeLabelView;
+    private final LinearLayout panel;
     private final Button prevDay;
     private final Button nextDay;
     private final TextView dayLabel;
     private final LinearLayout slotsRow;
-    private final TextView flagView;
-    private final ImageView pinView;
-    private final TextView placeLabelView;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Runnable refreshTick = this::refresh;
@@ -83,72 +93,106 @@ final class NightForecastFooter {
     private TimeZone zone = TimeZone.getDefault();
     private String loadedKey = "";
     private boolean started;
+    private boolean open;
 
     NightForecastFooter(Context context) {
         this.app = context.getApplicationContext();
         this.density = context.getResources().getDisplayMetrics().density;
 
+        // --- barra in fondo: riquadro meteo + paese
         root = new LinearLayout(context);
         root.setOrientation(LinearLayout.HORIZONTAL);
         root.setGravity(Gravity.CENTER_VERTICAL);
         root.setBackgroundColor(0xFFE8EEF4);
-        root.setPadding((int) (8 * density), (int) (6 * density), (int) (8 * density), (int) (6 * density));
+        root.setPadding(dp(8), dp(5), dp(12), dp(5));
         root.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
+        LinearLayout box = new LinearLayout(context);
+        box.setOrientation(LinearLayout.HORIZONTAL);
+        box.setGravity(Gravity.CENTER_VERTICAL);
+        box.setBackground(card());
+        box.setPadding(dp(8), dp(4), dp(10), dp(4));
+        box.setOnClickListener(v -> toggle());
+        boxIcon = new ImageView(context);
+        boxIcon.setLayoutParams(new LinearLayout.LayoutParams(dp(24), dp(24)));
+        box.addView(boxIcon);
+        boxText = new TextView(context);
+        boxText.setTextSize(15);
+        boxText.setTypeface(boxText.getTypeface(), Typeface.BOLD);
+        boxText.setTextColor(TEXT);
+        boxText.setMaxLines(1);
+        boxText.setPadding(dp(6), 0, dp(6), 0);
+        box.addView(boxText);
+        boxArrow = new TextView(context);
+        boxArrow.setText("▲");
+        boxArrow.setTextSize(13);
+        boxArrow.setTextColor(NAV_ON);
+        box.addView(boxArrow);
+        root.addView(box, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        root.addView(new View(context), new LinearLayout.LayoutParams(0, 1, 1f));
+
+        placeLabelView = new TextView(context);
+        placeLabelView.setTextSize(15);
+        placeLabelView.setTypeface(placeLabelView.getTypeface(), Typeface.BOLD);
+        placeLabelView.setTextColor(TEXT);
+        placeLabelView.setMaxLines(1);
+        placeLabelView.setPadding(dp(8), 0, 0, 0);
+        root.addView(placeLabelView);
+
+        // --- barra sovrapposta (MainActivity la mette sopra il contenuto, in basso)
+        panel = new LinearLayout(context);
+        panel.setOrientation(LinearLayout.HORIZONTAL);
+        panel.setGravity(Gravity.CENTER_VERTICAL);
+        panel.setBackground(card());
+        panel.setElevation(dp(6));
+        panel.setPadding(dp(4), dp(6), dp(8), dp(6));
+        panel.setVisibility(View.GONE);
+        panel.setClickable(true); // i tap non passano al contenuto sotto
+        FrameLayout.LayoutParams panelLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM);
+        panelLp.setMargins(dp(8), 0, dp(8), dp(6));
+        panel.setLayoutParams(panelLp);
+
         prevDay = navButton(context, "‹");
         prevDay.setOnClickListener(v -> shiftDay(-1));
-        root.addView(prevDay);
-
+        panel.addView(prevDay);
         dayLabel = new TextView(context);
         dayLabel.setTextSize(16);
         dayLabel.setTypeface(dayLabel.getTypeface(), Typeface.BOLD);
-        dayLabel.setTextColor(0xFF37474F);
+        dayLabel.setTextColor(TEXT);
         dayLabel.setMaxLines(1);
-        dayLabel.setPadding((int) (4 * density), 0, (int) (6 * density), 0);
-        root.addView(dayLabel);
-
+        dayLabel.setPadding(dp(4), 0, dp(6), 0);
+        panel.addView(dayLabel);
         nextDay = navButton(context, "›");
         nextDay.setOnClickListener(v -> shiftDay(1));
-        root.addView(nextDay);
+        panel.addView(nextDay);
 
         HorizontalScrollView scroll = new HorizontalScrollView(context);
         scroll.setHorizontalScrollBarEnabled(false);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        scrollLp.setMarginStart((int) (6 * density));
+        scrollLp.setMarginStart(dp(6));
         scroll.setLayoutParams(scrollLp);
         slotsRow = new LinearLayout(context);
         slotsRow.setOrientation(LinearLayout.HORIZONTAL);
         slotsRow.setGravity(Gravity.CENTER_VERTICAL);
         scroll.addView(slotsRow);
-        root.addView(scroll);
+        panel.addView(scroll);
+    }
 
-        LinearLayout placeBox = new LinearLayout(context);
-        placeBox.setOrientation(LinearLayout.HORIZONTAL);
-        placeBox.setGravity(Gravity.CENTER_VERTICAL);
-        placeBox.setPadding((int) (6 * density), 0, 0, 0);
+    private int dp(float value) {
+        return (int) (value * density);
+    }
 
-        flagView = new TextView(context);
-        flagView.setTextSize(18);
-        flagView.setIncludeFontPadding(false);
-        flagView.setPadding(0, 0, (int) (4 * density), 0);
-        placeBox.addView(flagView);
-
-        pinView = new ImageView(context);
-        pinView.setImageResource(R.drawable.ic_place_pin);
-        LinearLayout.LayoutParams pinLp = new LinearLayout.LayoutParams((int) (16 * density), (int) (16 * density));
-        pinLp.setMarginEnd((int) (4 * density));
-        pinView.setLayoutParams(pinLp);
-        placeBox.addView(pinView);
-
-        placeLabelView = new TextView(context);
-        placeLabelView.setTextSize(16);
-        placeLabelView.setTypeface(placeLabelView.getTypeface(), Typeface.BOLD);
-        placeLabelView.setTextColor(0xFF37474F);
-        placeLabelView.setMaxLines(1);
-        placeBox.addView(placeLabelView);
-        root.addView(placeBox);
+    private GradientDrawable card() {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(0xFFFFFFFF);
+        g.setStroke(Math.max(1, dp(1)), 0xFF90A4AE);
+        g.setCornerRadius(dp(6));
+        return g;
     }
 
     private Button navButton(Context context, String label) {
@@ -161,16 +205,22 @@ final class NightForecastFooter {
         b.setMinimumWidth(0);
         b.setMinHeight(0);
         b.setMinimumHeight(0);
-        b.setPadding((int) (8 * density), 0, (int) (8 * density), 0);
+        b.setPadding(dp(8), 0, dp(8), 0);
         b.setBackgroundColor(0x00000000);
-        b.setTextColor(0xFF1565C0);
+        b.setTextColor(NAV_ON);
         b.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         return b;
     }
 
+    /** La barra in fondo. */
     View view() {
         return root;
+    }
+
+    /** La barra sovrapposta: va in un FrameLayout sopra il contenuto (gravity bottom già impostata). */
+    View panelView() {
+        return panel;
     }
 
     void start() {
@@ -188,6 +238,25 @@ final class NightForecastFooter {
         mainHandler.removeCallbacks(refreshTick);
     }
 
+    private void toggle() {
+        if (open) {
+            close();
+        } else if (!nights.isEmpty()) {
+            open = true;
+            panel.setVisibility(View.VISIBLE);
+            boxArrow.setText("▼");
+        }
+    }
+
+    /** Chiude la barra sovrapposta; true se era aperta (per il tasto Indietro). */
+    boolean close() {
+        if (!open) return false;
+        open = false;
+        panel.setVisibility(View.GONE);
+        boxArrow.setText("▲");
+        return true;
+    }
+
     /** Riscarica solo se sito / ore della notte sono cambiati (le preferenze cambiano spesso). */
     private void onSiteMaybeChanged() {
         if (started && !siteKey().equals(loadedKey)) refresh();
@@ -203,19 +272,20 @@ final class NightForecastFooter {
             loadedKey = "";
             nights = new ArrayList<>();
             nightIndex = 0;
-            slotsRow.removeAllViews();
-            dayLabel.setText(R.string.forecast_footer_no_site);
-            updateNavEnabled();
+            close();
+            showBox(app.getString(R.string.forecast_footer_no_site));
             return;
         }
-        if (nights.isEmpty()) dayLabel.setText(R.string.forecast_footer_loading);
+        if (nights.isEmpty()) showBox(app.getString(R.string.forecast_footer_loading));
         final String key = siteKey();
         final double lat = DevicePrefs.getLat(app);
         final double lon = DevicePrefs.getLon(app);
         final int[] hours = ObservatorySite.helperNightHours(app, lat, lon);
         final int startHour = hours == null ? DEFAULT_NIGHT_START : hours[0];
         final int endHour = hours == null ? DEFAULT_NIGHT_END : hours[1];
+        final boolean needTown = placeLabel().isEmpty();
         worker.execute(() -> {
+            if (needTown) ObservatorySite.resolveTown(app, lat, lon);
             String error = "";
             List<Night> result = null;
             TimeZone tz = TimeZone.getDefault();
@@ -244,22 +314,20 @@ final class NightForecastFooter {
 
     private void applyResult(String key, List<Night> fetched, TimeZone tz, String err) {
         if (!started) return;
+        bindPlace();
         if (fetched == null || fetched.isEmpty()) {
-            if (!nights.isEmpty() && key.equals(loadedKey)) {
-                bindCurrentNight(); // tieni l'ultimo aggiornamento buono
-                return;
-            }
+            if (!nights.isEmpty() && key.equals(loadedKey)) return; // tieni l'ultimo aggiornamento buono
             nights = new ArrayList<>();
             nightIndex = 0;
-            slotsRow.removeAllViews();
-            dayLabel.setText(friendlyError(placeLabel(), err));
-            updateNavEnabled();
+            close();
+            showBox(friendlyError(err));
             return;
         }
         loadedKey = key;
         zone = tz;
         nights = fetched;
         if (nightIndex >= nights.size()) nightIndex = 0;
+        showBox(null);
         bindCurrentNight();
     }
 
@@ -270,23 +338,68 @@ final class NightForecastFooter {
         bindCurrentNight();
     }
 
+    /** Solo il paese/città: nome dell'Helper («Adelfia, Bari» → «Adelfia») o reverse geocoding. */
     private String placeLabel() {
         if (!DevicePrefs.hasSite(app)) return "";
         double lat = DevicePrefs.getLat(app);
         double lon = DevicePrefs.getLon(app);
         String label = ObservatorySite.helperLabel(app, lat, lon);
-        if (!label.isEmpty()) return label;
-        return app.getString(R.string.forecast_footer_coords, lat, lon);
+        if (label.isEmpty()) label = ObservatorySite.cachedTown(app, lat, lon);
+        int comma = label.indexOf(',');
+        return (comma >= 0 ? label.substring(0, comma) : label).trim();
     }
 
     private void bindPlace() {
-        String text = placeLabel();
-        placeLabelView.setText(text);
-        String flag = flagEmoji(DevicePrefs.hasSite(app)
-                ? ObservatorySite.helperCountry(app, DevicePrefs.getLat(app), DevicePrefs.getLon(app)) : "");
-        flagView.setVisibility(flag.isEmpty() ? View.GONE : View.VISIBLE);
-        flagView.setText(flag);
-        pinView.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
+        placeLabelView.setText(placeLabel());
+    }
+
+    /** Riquadro: il messaggio, oppure (null) la prima previsione ancora utile della notte. */
+    private void showBox(String message) {
+        Slot slot = null;
+        if (message == null && !nights.isEmpty()) {
+            List<Slot> slots = nights.get(0).slots;
+            long from = System.currentTimeMillis() - 90 * 60_000L;
+            for (Slot s : slots) {
+                if (s.epochMs >= from) {
+                    slot = s;
+                    break;
+                }
+            }
+            if (slot == null && !slots.isEmpty()) slot = slots.get(0);
+        }
+        if (slot == null) {
+            boxIcon.setVisibility(View.GONE);
+            boxArrow.setVisibility(View.GONE);
+            boxText.setTextColor(TEXT);
+            boxText.setText(message == null ? "" : message);
+            return;
+        }
+        SimpleDateFormat fmt = new SimpleDateFormat("HH:mm", Locale.getDefault());
+        fmt.setTimeZone(zone);
+        String meta = slotMeta(slot);
+        boxIcon.setImageResource(iconFor(slot.weatherCode));
+        boxIcon.setVisibility(View.VISIBLE);
+        boxArrow.setVisibility(View.VISIBLE);
+        boxText.setTextColor(slot.precipitationMm >= 0.05d ? RAIN : TEXT);
+        boxText.setText(firstLabel(slot.epochMs) + " " + fmt.format(new Date(slot.epochMs))
+                + (meta.isEmpty() ? "" : " · " + meta));
+    }
+
+    /** «Stasera» (dalle 18 di oggi), «Stanotte» (dopo mezzanotte), altrimenti Oggi/Domani/Notte. */
+    private String firstLabel(long epochMs) {
+        Calendar slot = Calendar.getInstance(zone);
+        slot.setTimeInMillis(epochMs);
+        int hour = slot.get(Calendar.HOUR_OF_DAY);
+        clearTime(slot);
+        Calendar today = Calendar.getInstance(zone);
+        clearTime(today);
+        int days = (int) Math.round((slot.getTimeInMillis() - today.getTimeInMillis()) / 86_400_000d);
+        if (days == 0) {
+            return app.getString(hour >= 18 ? R.string.forecast_first_evening : R.string.forecast_day_today);
+        }
+        if (days == 1 && hour < 12) return app.getString(R.string.forecast_first_night);
+        if (days == 1) return app.getString(R.string.forecast_day_tomorrow);
+        return app.getString(R.string.forecast_first_later);
     }
 
     private void bindCurrentNight() {
@@ -300,13 +413,13 @@ final class NightForecastFooter {
         dayLabel.setText(dayCaption(night.startMs));
         SimpleDateFormat fmt = new SimpleDateFormat("HH:mm", Locale.getDefault());
         fmt.setTimeZone(zone);
-        int gap = (int) (8 * density);
+        int gap = dp(8);
         for (int i = 0; i < night.slots.size(); i++) {
             Slot slot = night.slots.get(i);
             LinearLayout cell = new LinearLayout(root.getContext());
             cell.setOrientation(LinearLayout.HORIZONTAL);
             cell.setGravity(Gravity.CENTER_VERTICAL);
-            cell.setPadding((int) (5 * density), 0, (int) (5 * density), 0);
+            cell.setPadding(dp(5), 0, dp(5), 0);
             LinearLayout.LayoutParams cellLp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             if (i > 0) cellLp.setMarginStart(gap);
@@ -314,13 +427,13 @@ final class NightForecastFooter {
 
             ImageView icon = new ImageView(root.getContext());
             icon.setImageResource(iconFor(slot.weatherCode));
-            icon.setLayoutParams(new LinearLayout.LayoutParams((int) (28 * density), (int) (28 * density)));
+            icon.setLayoutParams(new LinearLayout.LayoutParams(dp(28), dp(28)));
             cell.addView(icon);
 
             LinearLayout texts = new LinearLayout(root.getContext());
             texts.setOrientation(LinearLayout.VERTICAL);
             texts.setGravity(Gravity.CENTER_VERTICAL);
-            texts.setPadding((int) (4 * density), 0, 0, 0);
+            texts.setPadding(dp(4), 0, 0, 0);
 
             TextView time = new TextView(root.getContext());
             time.setText(fmt.format(new Date(slot.epochMs)));
@@ -337,7 +450,7 @@ final class NightForecastFooter {
                 detail.setTypeface(detail.getTypeface(), Typeface.BOLD);
                 detail.setMaxLines(1);
                 detail.setIncludeFontPadding(false);
-                detail.setTextColor(slot.precipitationMm >= 0.05d ? 0xFF1565C0 : 0xFF37474F);
+                detail.setTextColor(slot.precipitationMm >= 0.05d ? RAIN : TEXT);
                 texts.addView(detail);
             }
             cell.addView(texts);
@@ -349,8 +462,8 @@ final class NightForecastFooter {
     private void updateNavEnabled() {
         prevDay.setEnabled(nightIndex > 0);
         nextDay.setEnabled(nightIndex + 1 < nights.size());
-        prevDay.setTextColor(prevDay.isEnabled() ? 0xFF1565C0 : 0xFFB0BEC5);
-        nextDay.setTextColor(nextDay.isEnabled() ? 0xFF1565C0 : 0xFFB0BEC5);
+        prevDay.setTextColor(prevDay.isEnabled() ? NAV_ON : NAV_OFF);
+        nextDay.setTextColor(nextDay.isEnabled() ? NAV_ON : NAV_OFF);
     }
 
     // ------------------------------------------------------------------ Open-Meteo (come OpenMeteoClient.fetchNightSlots)
@@ -497,27 +610,16 @@ final class NightForecastFooter {
         return R.drawable.ic_wx_cloud;
     }
 
-    private static String flagEmoji(String iso2) {
-        if (iso2 == null) return "";
-        String code = iso2.trim().toUpperCase(Locale.US);
-        if (code.length() != 2) return "";
-        char a = code.charAt(0);
-        char b = code.charAt(1);
-        if (a < 'A' || a > 'Z' || b < 'A' || b > 'Z') return "";
-        return new String(Character.toChars(0x1F1E6 + (a - 'A')))
-                + new String(Character.toChars(0x1F1E6 + (b - 'A')));
-    }
-
-    private String friendlyError(String place, String err) {
+    private String friendlyError(String err) {
         String lower = err == null ? "" : err.toLowerCase(Locale.US);
-        if (lower.isEmpty()) return app.getString(R.string.forecast_footer_empty, place);
+        if (lower.isEmpty()) return app.getString(R.string.forecast_footer_empty);
         if (lower.contains("unable to resolve host") || lower.contains("unreachable")
                 || lower.contains("no route to host")) {
-            return app.getString(R.string.forecast_footer_no_route, place);
+            return app.getString(R.string.forecast_footer_no_route);
         }
         if (lower.contains("timeout") || lower.contains("timed out")) {
-            return app.getString(R.string.forecast_footer_timeout, place);
+            return app.getString(R.string.forecast_footer_timeout);
         }
-        return app.getString(R.string.forecast_footer_error, place);
+        return app.getString(R.string.forecast_footer_error);
     }
 }

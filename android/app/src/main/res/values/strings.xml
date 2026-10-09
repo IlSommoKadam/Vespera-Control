@@ -265,12 +265,14 @@
 
     <!-- Footer meteo (come Vespera Helper) -->
     <string name="forecast_footer_loading">Aggiornamento meteo…</string>
-    <string name="forecast_footer_no_site">Imposta la posizione in Impostazioni per le previsioni.</string>
-    <string name="forecast_footer_empty">Nessuna previsione notturna disponibile · %1$s</string>
-    <string name="forecast_footer_error">Meteo non raggiungibile · %1$s</string>
-    <string name="forecast_footer_no_route">Senza Internet · %1$s</string>
-    <string name="forecast_footer_timeout">Timeout verso Open-Meteo · %1$s</string>
-    <string name="forecast_footer_coords">%1$.2f, %2$.2f</string>
+    <string name="forecast_footer_no_site">Imposta la posizione per il meteo</string>
+    <string name="forecast_footer_empty">Nessuna previsione</string>
+    <string name="forecast_footer_error">Meteo non raggiungibile</string>
+    <string name="forecast_footer_no_route">Meteo: senza Internet</string>
+    <string name="forecast_footer_timeout">Meteo: timeout</string>
+    <string name="forecast_first_evening">Stasera</string>
+    <string name="forecast_first_night">Stanotte</string>
+    <string name="forecast_first_later">Notte</string>
     <string name="forecast_day_today">Oggi</string>
     <string name="forecast_day_tomorrow">Domani</string>
     <string name="forecast_day_after_tomorrow">Dopodomani</string>

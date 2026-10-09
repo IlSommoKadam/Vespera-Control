@@ -80,10 +80,11 @@ Dalla 0.8.37 l'Helper rilegge la memoria interna via FTP anche senza pannello ap
 
 ### Footer meteo (Control ≥ 0.2.53, Helper ≥ 0.8.48)
 
-I client mostrano in fondo la stessa riga meteo dell'Helper (Open-Meteo, fasce di 3 h dal tramonto all'alba,
-‹ giorno ›, luogo). Usano la posizione salvata nel client; se coincide col sito dell'Helper (entro ~0,1°) prendono
-da `telescope` anche `siteLabel`, `siteCountry` (bandiera, solo APK), `nightStartHour` / `nightEndHour`
-(= fine / inizio giornata del sito; default 19 → 10) e `siteTimeZone`.
+In fondo ai client: un riquadro con la prima previsione della sera (Open-Meteo) e ▲; un tap apre sopra il footer
+una barra con l'evoluzione della notte a fasce di 3 h (‹ giorno ›), come il footer dell'Helper. A destra solo il
+nome del paese. Posizione: quella salvata nel client; se coincide col sito dell'Helper (entro ~0,1°) usano da
+`telescope` il primo pezzo di `siteLabel` e `nightStartHour` / `nightEndHour` (= fine / inizio giornata del sito;
+default 19 → 10), altrimenti il nome viene dal reverse geocoding (BigDataCloud).
 
 ### Coda sync foto (Helper ≥ 0.8.37)
 

@@ -48,12 +48,19 @@
             app:tabRippleColor="@color/vespera_slate_muted" />
     </FrameLayout>
 
-    <androidx.viewpager2.widget.ViewPager2
-        android:id="@+id/viewPager"
+    <!-- Contenuto + barra meteo sovrapposta (aperta dal riquadro del footer) -->
+    <FrameLayout
+        android:id="@+id/contentFrame"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="@color/vespera_bg" />
+        android:layout_weight="1">
+
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/viewPager"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/vespera_bg" />
+    </FrameLayout>
 
     <View
         android:layout_width="match_parent"

@@ -25,15 +25,14 @@ public final class ObservatorySite {
 
     private static final String HELPER_PREFS = "vespera_helper_site";
 
-    /** Nome, paese e ore della notte del sito impostato nell'Helper (≥ 0.8.48 per paese e ore). */
+    /** Nome e ore della notte del sito impostato nell'Helper (≥ 0.8.48 per le ore). */
     static void rememberHelper(Context context, JSONObject telescope) {
         double[] site = parse(telescope);
         if (site == null) return;
         android.content.SharedPreferences.Editor e = helperPrefs(context).edit()
                 .putString("lat", String.valueOf(site[0]))
                 .putString("lon", String.valueOf(site[1]))
-                .putString("label", telescope.optString("siteLabel", "").trim())
-                .putString("country", telescope.optString("siteCountry", "").trim());
+                .putString("label", telescope.optString("siteLabel", "").trim());
         if (telescope.has("nightStartHour") && telescope.has("nightEndHour")) {
             e.putInt("nightStart", telescope.optInt("nightStartHour", -1))
                     .putInt("nightEnd", telescope.optInt("nightEndHour", -1));
@@ -58,10 +57,35 @@ public final class ObservatorySite {
         return label == null ? "" : label;
     }
 
-    static String helperCountry(Context context, double lat, double lon) {
-        if (!sameAsHelper(context, lat, lon)) return "";
-        String country = helperPrefs(context).getString("country", "");
-        return country == null ? "" : country;
+    /** Nome del paese già trovato per queste coordinate (reverse geocoding), o "". */
+    static String cachedTown(Context context, double lat, double lon) {
+        android.content.SharedPreferences p = helperPrefs(context);
+        if (!townKey(lat, lon).equals(p.getString("townKey", ""))) return "";
+        String town = p.getString("town", "");
+        return town == null ? "" : town;
+    }
+
+    /** Cerca il nome del paese/città (BigDataCloud, senza chiave). Da thread di lavoro. */
+    static void resolveTown(Context context, double lat, double lon) {
+        if (!cachedTown(context, lat, lon).isEmpty()) return;
+        try {
+            com.vaonis.vesperacontrol.catalog.HttpsFetch.Result r =
+                    com.vaonis.vesperacontrol.catalog.HttpsFetch.get("api.bigdatacloud.net",
+                            String.format(java.util.Locale.US,
+                                    "/data/reverse-geocode-client?latitude=%.5f&longitude=%.5f"
+                                            + "&localityLanguage=it", lat, lon));
+            if (r.code < 200 || r.code >= 300) return;
+            JSONObject o = new JSONObject(r.body);
+            String town = o.optString("city", "").trim();
+            if (town.isEmpty()) town = o.optString("locality", "").trim();
+            if (town.isEmpty()) return;
+            helperPrefs(context).edit().putString("townKey", townKey(lat, lon)).putString("town", town).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static String townKey(double lat, double lon) {
+        return String.format(java.util.Locale.US, "%.3f,%.3f", lat, lon);
     }
 
     /** {inizio notte, alba} come nell'Helper, o null (default 19 → 10). */

@@ -148,15 +148,55 @@ def slot_meta(slot: Slot) -> str:
     return " · ".join(parts)
 
 
-def friendly_error(place: str, err: str) -> str:
+def first_slot(result: Result) -> tuple[str, Slot] | None:
+    """Prima previsione ancora utile della notte in corso/prossima, con «Stasera»/«Stanotte»."""
+    if not result.nights:
+        return None
+    slots = result.nights[0].slots
+    upcoming = [s for s in slots if s.when >= result.now - timedelta(hours=1, minutes=30)]
+    slot = upcoming[0] if upcoming else slots[0]
+    if slot.when.date() > result.now.date() and slot.when.hour < 12:
+        label = "Stanotte" if slot.when.date() == result.now.date() + timedelta(days=1) else "Notte"
+    elif slot.when.date() == result.now.date():
+        label = "Stasera" if slot.when.hour >= 18 else "Oggi"
+    else:
+        label = "Domani"
+    return label, slot
+
+
+def town_from_label(label: str) -> str:
+    """«Adelfia, Bari, Italia» → «Adelfia» (solo il paese/città)."""
+    return (label or "").split(",")[0].strip()
+
+
+_TOWNS: dict[tuple, str] = {}
+
+
+def town(lat: float, lon: float) -> str:
+    """Nome del paese/città per le coordinate (BigDataCloud, senza chiave); "" se non trovato."""
+    key = (round(lat, 3), round(lon, 3))
+    if key in _TOWNS:
+        return _TOWNS[key]
+    path = ("/data/reverse-geocode-client?latitude=%.5f&longitude=%.5f&localityLanguage=it" % (lat, lon))
+    code, body = sky._get_text("api.bigdatacloud.net", path)
+    name = ""
+    if 200 <= code < 300:
+        data = json.loads(body)
+        name = str(data.get("city") or data.get("locality") or "").strip()
+    _TOWNS[key] = name
+    return name
+
+
+def friendly_error(err: str) -> str:
+    """Testo breve per il riquadro meteo."""
     low = (err or "").lower()
     if not low:
-        return f"Nessuna previsione notturna disponibile · {place}"
+        return "Nessuna previsione"
     if any(k in low for k in ("unreachable", "no route", "getaddrinfo", "11001", "name or service")):
-        return f"Senza Internet · {place}"
+        return "Meteo: senza Internet"
     if "timed out" in low or "timeout" in low:
-        return f"Timeout verso Open-Meteo · {place}"
-    return f"Meteo non raggiungibile · {place}"
+        return "Meteo: timeout"
+    return "Meteo non raggiungibile"
 
 
 # --------------------------------------------------------------------------- icone (come ic_wx_* dell'Helper)
