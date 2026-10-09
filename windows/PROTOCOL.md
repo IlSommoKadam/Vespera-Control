@@ -78,6 +78,13 @@ per oggetto (più passi dello stesso oggetto) e mostrano il totale del piano.
 I client mostrano queste righe nel tab Telescopio (con Helper vecchi le ricavano dai singoli campi) al posto della riga riassuntiva.
 Dalla 0.8.37 l'Helper rilegge la memoria interna via FTP anche senza pannello aperto (ogni 10 min, 2 min finchÃ© non riesce); nel frattempo la riga vale Â«controllo FTPâ€¦Â».
 
+### Footer meteo (Control ≥ 0.2.53, Helper ≥ 0.8.48)
+
+I client mostrano in fondo la stessa riga meteo dell'Helper (Open-Meteo, fasce di 3 h dal tramonto all'alba,
+‹ giorno ›, luogo). Usano la posizione salvata nel client; se coincide col sito dell'Helper (entro ~0,1°) prendono
+da `telescope` anche `siteLabel`, `siteCountry` (bandiera, solo APK), `nightStartHour` / `nightEndHour`
+(= fine / inizio giornata del sito; default 19 → 10) e `siteTimeZone`.
+
 ### Coda sync foto (Helper ≥ 0.8.37)
 
 `remote.state.json` → `sync`: `running`, `paused`, `autoSync`, `nextAutoAt`, `lastSync`, avanzamento corrente

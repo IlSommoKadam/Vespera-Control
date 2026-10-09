@@ -168,6 +168,15 @@ public final class DevicePrefs {
         return port > 0 && port <= 65535;
     }
 
+    /** Footer meteo: si riaggiorna quando cambia la posizione. */
+    public static void registerListener(Context context, SharedPreferences.OnSharedPreferenceChangeListener l) {
+        prefs(context).registerOnSharedPreferenceChangeListener(l);
+    }
+
+    public static void unregisterListener(Context context, SharedPreferences.OnSharedPreferenceChangeListener l) {
+        prefs(context).unregisterOnSharedPreferenceChangeListener(l);
+    }
+
     private static SharedPreferences prefs(Context context) {
         return context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }

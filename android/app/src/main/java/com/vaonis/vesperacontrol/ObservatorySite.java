@@ -13,11 +13,79 @@ public final class ObservatorySite {
     /** Salva la posizione Vespera solo se l'utente non ne ha messa una a mano o via GPS. */
     public static void captureIfUnset(Context context, JSONObject telescope) {
         if (context == null) return;
+        rememberHelper(context, telescope);
         String source = DevicePrefs.getSiteSource(context);
         if (DevicePrefs.SITE_MANUAL.equals(source) || DevicePrefs.SITE_GPS.equals(source)) return;
         double[] site = parse(telescope);
         if (site == null) return;
         DevicePrefs.setSite(context, site[0], site[1], DevicePrefs.SITE_VESPERA);
+    }
+
+    // ------------------------------------------------------------------ sito dell'Helper per il footer meteo
+
+    private static final String HELPER_PREFS = "vespera_helper_site";
+
+    /** Nome, paese e ore della notte del sito impostato nell'Helper (≥ 0.8.48 per paese e ore). */
+    static void rememberHelper(Context context, JSONObject telescope) {
+        double[] site = parse(telescope);
+        if (site == null) return;
+        android.content.SharedPreferences.Editor e = helperPrefs(context).edit()
+                .putString("lat", String.valueOf(site[0]))
+                .putString("lon", String.valueOf(site[1]))
+                .putString("label", telescope.optString("siteLabel", "").trim())
+                .putString("country", telescope.optString("siteCountry", "").trim());
+        if (telescope.has("nightStartHour") && telescope.has("nightEndHour")) {
+            e.putInt("nightStart", telescope.optInt("nightStartHour", -1))
+                    .putInt("nightEnd", telescope.optInt("nightEndHour", -1));
+        } else {
+            e.remove("nightStart").remove("nightEnd");
+        }
+        e.apply();
+    }
+
+    /** Vale solo se il sito dell'app è lo stesso posto dell'Helper (entro ~10 km). */
+    private static boolean sameAsHelper(Context context, double lat, double lon) {
+        android.content.SharedPreferences p = helperPrefs(context);
+        double hLat = DevicePrefs.parseCoord(p.getString("lat", ""));
+        double hLon = DevicePrefs.parseCoord(p.getString("lon", ""));
+        return !Double.isNaN(hLat) && !Double.isNaN(hLon)
+                && Math.abs(hLat - lat) < 0.1 && Math.abs(hLon - lon) < 0.1;
+    }
+
+    static String helperLabel(Context context, double lat, double lon) {
+        if (!sameAsHelper(context, lat, lon)) return "";
+        String label = helperPrefs(context).getString("label", "");
+        return label == null ? "" : label;
+    }
+
+    static String helperCountry(Context context, double lat, double lon) {
+        if (!sameAsHelper(context, lat, lon)) return "";
+        String country = helperPrefs(context).getString("country", "");
+        return country == null ? "" : country;
+    }
+
+    /** {inizio notte, alba} come nell'Helper, o null (default 19 → 10). */
+    static int[] helperNightHours(Context context, double lat, double lon) {
+        if (!sameAsHelper(context, lat, lon)) return null;
+        android.content.SharedPreferences p = helperPrefs(context);
+        int start = p.getInt("nightStart", -1);
+        int end = p.getInt("nightEnd", -1);
+        if (start < 0 || start > 23 || end < 0 || end > 23) return null;
+        return new int[]{start, end};
+    }
+
+    static void registerHelperListener(Context context,
+            android.content.SharedPreferences.OnSharedPreferenceChangeListener l) {
+        helperPrefs(context).registerOnSharedPreferenceChangeListener(l);
+    }
+
+    static void unregisterHelperListener(Context context,
+            android.content.SharedPreferences.OnSharedPreferenceChangeListener l) {
+        helperPrefs(context).unregisterOnSharedPreferenceChangeListener(l);
+    }
+
+    private static android.content.SharedPreferences helperPrefs(Context context) {
+        return context.getApplicationContext().getSharedPreferences(HELPER_PREFS, Context.MODE_PRIVATE);
     }
 
     public static double[] parse(JSONObject telescope) {

@@ -58,6 +58,7 @@ public class MainActivity extends AppCompatActivity {
     private ViewPager2 viewPager;
     private MaterialToolbar toolbar;
     private boolean autoConnectStarted;
+    private NightForecastFooter forecastFooter;
     /** Aggiorna il sottotitolo quando la connessione ADB si apre/chiude (anche da altri tab). */
     private final AdbBridge.StateListener adbListener = (linked, target, message) -> runOnUiThread(() -> {
         if (isFinishing()) return;
@@ -80,6 +81,9 @@ public class MainActivity extends AppCompatActivity {
         setSupportActionBar(toolbar);
         setConnectionSubtitle(null);
         toolbar.setSubtitleTextColor(ContextCompat.getColor(this, R.color.vespera_muted));
+
+        forecastFooter = new NightForecastFooter(this);
+        ((ViewGroup) findViewById(R.id.forecastFooter)).addView(forecastFooter.view());
 
         viewPager = findViewById(R.id.viewPager);
         tabLayout = findViewById(R.id.tabLayout);
@@ -175,6 +179,18 @@ public class MainActivity extends AppCompatActivity {
         if (toolbar == null) return;
         String base = "APK " + BuildConfig.VERSION_NAME + " · rev " + BuildConfig.VERSION_CODE;
         toolbar.setSubtitle(TextUtils.isEmpty(status) ? base : base + " · " + status);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        forecastFooter.start();
+    }
+
+    @Override
+    protected void onStop() {
+        forecastFooter.stop();
+        super.onStop();
     }
 
     @Override

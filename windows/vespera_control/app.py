@@ -34,6 +34,7 @@ from vespera_control.scrcpy_util import (  # noqa: E402
     scrcpy_help,
 )
 from vespera_control import sky  # noqa: E402
+from vespera_control.forecast_footer import ForecastFooter  # noqa: E402
 from vespera_control.updates import LOCAL_CODE, LOCAL_VERSION  # noqa: E402
 from vespera_control import instrument_status as istatus  # noqa: E402
 
@@ -299,6 +300,7 @@ class App(tk.Tk):
         self._style()
         self._build()
         self._load_settings()
+        self._update_forecast_site()
         if not self.scrcpy_path.get().strip():
             found = locate_scrcpy()
             if found:
@@ -422,6 +424,10 @@ class App(tk.Tk):
 
         tab_bar = ttk.Frame(self)
         tab_bar.pack(fill="x", padx=16, pady=(0, 0))
+        # Footer meteo come Vespera Helper: sempre visibile in fondo alla finestra.
+        self.forecast = ForecastFooter(self)
+        self.forecast.pack(side="bottom", fill="x")
+        tk.Frame(self, bg=PANEL_STROKE, height=1).pack(side="bottom", fill="x")
         page_host = ttk.Frame(self)
         page_host.pack(fill="both", expand=True, padx=16, pady=(4, 8))
 
@@ -1878,6 +1884,21 @@ class App(tk.Tk):
         self._save_settings()
         self.refresh_visibility()
         self.refresh_favorites()
+        self._update_forecast_site()
+
+    def _update_forecast_site(self) -> None:
+        """Footer meteo: sito salvato; nome e ore della notte dall'Helper (≥ 0.8.48) se è lo stesso posto."""
+        site = self._site()
+        tel = (self.state or {}).get("telescope") or {}
+        place, hours = "", None
+        helper = sky.parse_site(tel)
+        if site and helper and abs(site[0] - helper[0]) < 0.1 and abs(site[1] - helper[1]) < 0.1:
+            place = str(tel.get("siteLabel") or "").strip()
+            try:
+                hours = (int(tel["nightStartHour"]), int(tel["nightEndHour"]))
+            except (KeyError, TypeError, ValueError):
+                hours = None
+        self.forecast.set_site(site, place, hours)
 
     def save_site_manual(self) -> None:
         site = self._site()
@@ -2286,6 +2307,7 @@ class App(tk.Tk):
             self._tg_binding = False
         self._update_tg_label(tg)
         self._capture_vespera_site(tel)
+        self._update_forecast_site()
         if self._obs_target is not None:
             self._obs_session = sky.find_session(self.state, self._obs_target.name, self._obs_target.query)
             self._show_obs_session()
