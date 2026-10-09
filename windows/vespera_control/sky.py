@@ -812,6 +812,14 @@ def report(lat: float, lon: float, object_name: str | None = None,
     if has_object and max_alt > -90:
         head += f" · max {max_alt:.0f}°"
     lines.append((best, head))
+    if has_object:
+        # Tempo utile (buona o ottima) in tutta la notte e da adesso
+        now = datetime.now()
+        good = [s for s in slots if level(s) >= GOOD]
+        usable = len(good) * STEP_MIN
+        from_now = sum(STEP_MIN for s in good if s[0] + timedelta(minutes=STEP_MIN) > now)
+        lines.append((NONE, f"Tempo di osservazione utile: {_duration(usable)} stanotte · "
+                            f"{_duration(from_now)} da adesso"))
     for lv in (GREAT, GOOD, POOR, NOT_VISIBLE):
         r = _ranges(slots, lambda s, lv=lv: level(s) == lv)
         if r:

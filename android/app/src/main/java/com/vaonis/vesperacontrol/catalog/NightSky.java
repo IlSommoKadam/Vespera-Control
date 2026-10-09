@@ -115,6 +115,19 @@ public final class NightSky {
         String head = who + " stanotte: " + (best == NOT_VISIBLE ? "non visibile" : "al meglio " + grade(best));
         if (hasObject && maxAlt > -90) head += String.format(Locale.ITALY, " · max %.0f°", maxAlt);
         lines.add(new Line(best, head));
+        if (hasObject) {
+            // Tempo utile (buona o ottima) in tutta la notte e da adesso
+            ZonedDateTime now = ZonedDateTime.now(zone);
+            int usable = 0;
+            int fromNow = 0;
+            for (Slot s : slots) {
+                if (s.level() < GOOD) continue;
+                usable += STEP_MIN;
+                if (s.when.plusMinutes(STEP_MIN).isAfter(now)) fromNow += STEP_MIN;
+            }
+            lines.add(new Line(NONE, "Tempo di osservazione utile: " + duration(usable)
+                    + " stanotte · " + duration(fromNow) + " da adesso"));
+        }
 
         for (int level = GREAT; level >= NOT_VISIBLE; level--) {
             final int wanted = level;

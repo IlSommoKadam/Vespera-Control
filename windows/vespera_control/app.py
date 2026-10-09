@@ -145,6 +145,26 @@ def tel_actions_allowed(tel: dict) -> dict:
     }
 
 
+def current_observation_line(tel: dict | None) -> str:
+    """Osservazione in corso sul telescopio: tempo integrato = pose × esposizione."""
+    if not tel or not tel.get("reachable"):
+        return "Osservazione corrente: telescopio non raggiungibile."
+    observing = bool(tel.get("isObserving", tel.get("observationStatus") == "RUNNING"))
+    if not observing:
+        return "Osservazione corrente: nessuna."
+    name = str(tel.get("targetName") or "").strip() or "in corso"
+    stacks = int(tel.get("stackingCount") or 0)
+    exp = float(tel.get("exposureMicroSec") or 0) / 1_000_000
+    text = f"Osservazione corrente: {name}"
+    if stacks > 0 and exp > 0:
+        m = round(stacks * exp / 60)
+        time = f"{m} min" if m < 60 else (f"{m // 60}h" if m % 60 == 0 else f"{m // 60}h{m % 60:02d}")
+        text += f" · {time} integrati ({stacks} pose da {exp:.0f} s)"
+    elif stacks > 0:
+        text += f" · {stacks} pose"
+    return text
+
+
 def tel_error_text(ack: str) -> str:
     """Spiega in italiano gli errori più comuni dei comandi telescopio."""
     low = (ack or "").lower()
@@ -978,9 +998,9 @@ class App(tk.Tk):
         btns.pack(side="bottom", fill="x", pady=(6, 0), before=self.obs_canvas)
         session.pack(side="bottom", anchor="w", pady=(2, 0), before=self.obs_canvas)
         details.pack(side="bottom", anchor="w", pady=(6, 0), before=self.obs_canvas)
-        self.obs_continue_btn = ttk.Button(btns, text="Continua multi-notte", style="Primary.TButton",
+        self.obs_continue_btn = ttk.Button(btns, text="Continua multi-notte", style="TButton",
                                            command=lambda: self.start_observe(True))
-        self.obs_start_btn = ttk.Button(btns, text="Avvia multi-notte", style="TButton",
+        self.obs_start_btn = ttk.Button(btns, text="Avvia", style="Primary.TButton",
                                         command=lambda: self.start_observe(False))
         self.fav_toggle_btn = ttk.Button(btns, text="☆ Aggiungi ai preferiti", style="TButton",
                                          command=self.toggle_favorite)
@@ -1101,17 +1121,17 @@ class App(tk.Tk):
             return
         self.obs_start_btn.pack_forget()
         self.obs_continue_btn.pack_forget()
+        current = current_observation_line(self.state.get("telescope"))
+        self.obs_start_btn.pack(side="left")
         if self._obs_session is not None:
             self.obs_session_text.set(
-                f"Multi-notte già sul telescopio: {self._obs_session.stacks} pose "
-                f"({self._obs_session.object_name}).")
-            self.obs_continue_btn.pack(side="left", padx=(0, 6))
-            self.obs_start_btn.configure(text="Nuova sessione")
+                f"{current}\nMulti-notte già sul telescopio: {self._obs_session.stacks} pose "
+                f"({self._obs_session.object_name}). Avvia ne apre una nuova, Continua aggiunge pose a questa.")
+            self.obs_continue_btn.pack(side="left", padx=(6, 0))
         else:
             self.obs_session_text.set(
-                "Nessuna sessione di questo oggetto. Avvia ne crea una che si può continuare.")
-            self.obs_start_btn.configure(text="Avvia multi-notte")
-        self.obs_start_btn.pack(side="left")
+                f"{current}\nAvvia punta e osserva subito, senza piano. "
+                "La sessione si può continuare le notti dopo.")
         self._update_fav_button()
         self.fav_toggle_btn.pack(side="left", padx=(6, 0))
 
@@ -1126,7 +1146,7 @@ class App(tk.Tk):
             done = f"Multi-notte ripresa: {target.name}"
         else:
             line = "cmd|telescope|observe|" + sky.start_body(target, self.state.get("telescope"))
-            done = f"Multi-notte avviata: {target.name}"
+            done = f"Osservazione avviata: {target.name}"
         self.obs_result.set("Invio al telescopio…")
         self._obs_pending = done
         self.cmd(line, wait=60)

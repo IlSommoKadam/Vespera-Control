@@ -473,18 +473,41 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
 
     private void showSession() {
         if (target == null) return;
+        String text = currentObservationLine(lastTelescopeJson) + "\n";
         if (session != null) {
-            textSession.setText(getString(
-                    R.string.telescope_observe_store, session.stacks, session.objectName));
+            text += getString(R.string.telescope_observe_store, session.stacks, session.objectName);
             btnContinue.setVisibility(View.VISIBLE);
-            btnStart.setText(R.string.telescope_observe_fresh);
         } else {
-            textSession.setText(R.string.telescope_observe_no_store);
+            text += getString(R.string.telescope_observe_no_store);
             btnContinue.setVisibility(View.GONE);
-            btnStart.setText(R.string.telescope_observe_start);
         }
+        textSession.setText(text);
         textSession.setVisibility(View.VISIBLE);
         btnStart.setVisibility(View.VISIBLE);
+    }
+
+    /** Osservazione in corso sul telescopio: tempo integrato = pose × esposizione. */
+    static String currentObservationLine(@Nullable JSONObject tel) {
+        if (tel == null || !tel.optBoolean("reachable")) return "Osservazione corrente: telescopio non raggiungibile.";
+        boolean observing = tel.has("isObserving")
+                ? tel.optBoolean("isObserving")
+                : "RUNNING".equals(tel.optString("observationStatus"));
+        int stacks = tel.optInt("stackingCount", 0);
+        if (!observing) return "Osservazione corrente: nessuna.";
+        String name = tel.optString("targetName", "").trim();
+        StringBuilder sb = new StringBuilder("Osservazione corrente: ")
+                .append(name.isEmpty() ? "in corso" : name);
+        long exp = tel.optLong("exposureMicroSec", 0);
+        if (stacks > 0 && exp > 0) {
+            long m = Math.round(stacks * (exp / 1_000_000.0) / 60.0);
+            String time = m < 60 ? m + " min"
+                    : m % 60 == 0 ? (m / 60) + "h" : String.format(Locale.ITALY, "%dh%02d", m / 60, m % 60);
+            sb.append(" · ").append(time).append(" integrati (")
+                    .append(stacks).append(String.format(Locale.ITALY, " pose da %.0f s)", exp / 1_000_000.0));
+        } else if (stacks > 0) {
+            sb.append(" · ").append(stacks).append(" pose");
+        }
+        return sb.toString();
     }
 
     private void refreshVisibility() {

@@ -188,13 +188,12 @@
     <string name="telescope_observe_net">Catalogo non raggiungibile. Serve Internet sul telefono.</string>
     <string name="telescope_observe_preview_fail">Coordinate pronte. L\'anteprima del campo non è arrivata.</string>
     <string name="telescope_observe_pointing">%1$s\n%2$s\nRA %3$s   ·   Dec %4$s\nRA %5$.3f°   ·   Dec %6$.3f°</string>
-    <string name="telescope_observe_store">Multi-notte già sul telescopio: %1$d pose (%2$s).</string>
-    <string name="telescope_observe_no_store">Nessuna sessione di questo oggetto. Avvia ne crea una che si può continuare.</string>
-    <string name="telescope_observe_start">Avvia multi-notte</string>
+    <string name="telescope_observe_store">Multi-notte già sul telescopio: %1$d pose (%2$s). Avvia ne apre una nuova, Continua aggiunge pose a questa.</string>
+    <string name="telescope_observe_no_store">Avvia punta e osserva subito, senza piano. La sessione si può continuare le notti dopo.</string>
+    <string name="telescope_observe_start">Avvia</string>
     <string name="telescope_observe_continue">Continua multi-notte</string>
-    <string name="telescope_observe_fresh">Nuova sessione</string>
     <string name="telescope_observe_sending">Invio al telescopio…</string>
-    <string name="telescope_observe_ok_new">Multi-notte avviata: %1$s</string>
+    <string name="telescope_observe_ok_new">Osservazione avviata: %1$s</string>
     <string name="telescope_observe_ok_resume">Multi-notte ripresa: %1$s</string>
     <string name="telescope_observe_fail">Osservazione non partita: %1$s</string>
     <string name="telescope_observe_fail_empty">Payload osservazione vuoto</string>
