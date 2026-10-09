@@ -131,6 +131,52 @@
                 android:text="AZ + ⟳" />
         </LinearLayout>
 
+        <Button
+            android:id="@+id/btnAzStop"
+            style="@style/Widget.Vespera.Button.Danger"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="■ Stop AZ" />
+
+        <TextView
+            android:id="@+id/textCable"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Cavo: —"
+            android:textColor="@color/vespera_title" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnCableUnwind"
+                style="@style/Widget.Vespera.Button.Primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Srotola ora" />
+
+            <Button
+                android:id="@+id/btnCableZero"
+                style="@style/Widget.Vespera.Button.Primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Cavo dritto: azzera" />
+        </LinearLayout>
+
+        <CheckBox
+            android:id="@+id/checkCableAuto"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="Srotola da solo di giorno (a braccio chiuso)"
+            android:textColor="@color/vespera_muted" />
+
         <TextView
             android:id="@+id/textTelescopioLog"
             android:layout_width="match_parent"

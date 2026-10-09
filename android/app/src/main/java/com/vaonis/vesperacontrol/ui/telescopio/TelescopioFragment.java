@@ -179,6 +179,14 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         editAzStep = view.findViewById(R.id.editAzStep);
         bindTelButton(view, R.id.btnAzMinus, "azRelative", v -> confirmAzRotate(-1));
         bindTelButton(view, R.id.btnAzPlus, "azRelative", v -> confirmAzRotate(1));
+        view.<Button>findViewById(R.id.btnAzStop).setOnClickListener(v -> sendAzStop());
+        textCable = view.findViewById(R.id.textCable);
+        btnCableUnwind = view.findViewById(R.id.btnCableUnwind);
+        btnCableUnwind.setOnClickListener(v -> confirmCableUnwind());
+        view.<Button>findViewById(R.id.btnCableZero).setOnClickListener(v -> confirmCableZero());
+        checkCableAuto = view.findViewById(R.id.checkCableAuto);
+        checkCableAuto.setOnClickListener(v -> sendCableLine(
+                "cmd|cable|auto|" + (checkCableAuto.isChecked() ? "on" : "off")));
         updateTelButtons();
 
         btnSearch.setOnClickListener(v -> searchTarget());
@@ -285,6 +293,7 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
             JSONObject root = new JSONObject(lastRawState);
             lastTelescopeJson = root.optJSONObject("telescope");
             showHelperPlan(root);
+            showCable(root.optJSONObject("cable"));
         } catch (Exception e) {
             lastTelescopeJson = null;
         }
@@ -1361,6 +1370,86 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
     }
 
     private android.widget.EditText editAzStep;
+    private TextView textCable;
+    private Button btnCableUnwind;
+    private android.widget.CheckBox checkCableAuto;
+    private double cableTurnsDeg;
+
+    /** Riga "Cavo" dal blocco {@code cable} di remote.state.json (Helper ≥ 0.8.47). */
+    private void showCable(JSONObject cable) {
+        if (textCable == null) return;
+        if (cable == null) {
+            textCable.setText("Cavo: conteggio non disponibile (aggiorna Vespera Helper ≥ 0.8.47).");
+            btnCableUnwind.setEnabled(false);
+            return;
+        }
+        cableTurnsDeg = cable.optDouble("turnsDeg", 0.0);
+        StringBuilder line = new StringBuilder(String.format(Locale.ITALY,
+                "Cavo: %+.2f giri (%+.0f°)  ·  auto %s",
+                cableTurnsDeg / 360.0, cableTurnsDeg, cable.optBoolean("auto", true) ? "sì" : "no"));
+        String extra = cable.optString("activity", "");
+        if (extra.isEmpty()) extra = cable.optString("lastResult", "");
+        if (!extra.isEmpty()) line.append("\n").append(extra);
+        textCable.setText(line);
+        checkCableAuto.setChecked(cable.optBoolean("auto", true));
+        btnCableUnwind.setEnabled(!cable.optBoolean("busy", false));
+    }
+
+    /** Stop immediato del motore AZ: nessuna conferma, funziona anche con un comando in corso. */
+    private void sendAzStop() {
+        if (adb == null) return;
+        textLog.setText("Stop AZ…");
+        adb.sendLine("cmd|telescope|azStop", 60_000L, (ok, msg) -> postUi(() -> {
+            textLog.setText(msg);
+            Toast.makeText(requireContext(), ok ? "Stop AZ inviato" : "Stop AZ non riuscito",
+                    Toast.LENGTH_SHORT).show();
+            pullState(false);
+        }));
+    }
+
+    private void sendCableLine(String line) {
+        if (adb == null) return;
+        textLog.setText("Invio " + line + "…");
+        adb.sendLine(line, 30_000L, (ok, msg) -> postUi(() -> {
+            textLog.setText(msg);
+            pullState(false);
+        }));
+    }
+
+    private void confirmCableUnwind() {
+        if (!isAdded()) return;
+        if (Math.abs(cableTurnsDeg) < 1.0) {
+            new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                    .setTitle("Srotola cavo")
+                    .setMessage("Il cavo risulta già dritto (meno di 1°).")
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+            return;
+        }
+        new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                .setTitle("Conferma: Srotola ora")
+                .setMessage(String.format(Locale.ITALY,
+                        "Il cavo risulta girato di %+.0f° (%+.2f giri).\n"
+                                + "Ruoto solo l'azimut di %+.0f° a passi di 90°.\n\n"
+                                + "Il telescopio si muove davvero: controlla che nulla ostacoli la rotazione.\n"
+                                + "Puoi fermarlo con «Stop AZ».",
+                        cableTurnsDeg, cableTurnsDeg / 360.0, -cableTurnsDeg))
+                .setIcon(android.R.drawable.ic_dialog_alert)
+                .setNegativeButton("Annulla", null)
+                .setPositiveButton("Srotola", (d, w) -> sendCableLine("cmd|cable|unwind"))
+                .show();
+    }
+
+    private void confirmCableZero() {
+        if (!isAdded()) return;
+        new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                .setTitle("Cavo dritto")
+                .setMessage("Confermi che ora il cavo di alimentazione è dritto (non attorcigliato)?\n\n"
+                        + "Il conteggio dei giri riparte da 0.")
+                .setNegativeButton("Annulla", null)
+                .setPositiveButton("Azzera", (d, w) -> sendCableLine("cmd|cable|zero"))
+                .show();
+    }
 
     /** Ruota solo il motore azimutale di ±N gradi (cmd|telescope|azRelative). */
     private void confirmAzRotate(int sign) {
@@ -1415,7 +1504,7 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
             }
         }
         long wait = ("init".equals(action) || "resume".equals(action)) ? 150_000L
-                : action.startsWith("azRelative") ? 240_000L : 45_000L;
+                : 45_000L;
         telescopeBusy = true;
         updateTelButtons();
         textLog.setText("Invio " + label + "…");

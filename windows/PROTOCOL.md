@@ -31,6 +31,8 @@ cmd|hd|list|mount|<spec>|unmount|eject|<spec>|wake|status
 cmd|sync|now|resume|pause
 cmd|telescope|park|stop|resume|init|shutdown|observe|{json}|observeResume|{storeId}
 cmd|telescope|azRelative|<gradi>
+cmd|telescope|azStop
+cmd|cable|unwind|zero|auto|on|off
 cmd|plan|load|{json}
 cmd|plan|cancel
 ```
@@ -39,7 +41,14 @@ cmd|plan|cancel
 
 ### Rotazione solo azimut (Helper ≥ 0.8.44)
 
-`cmd|telescope|azRelative|<gradi>` (±0,1…90) ruota solo il motore AZ con la route firmware `POST /v1/motors/goRelative`, body `{"AZ":<gradi>}` (firmato come park/init). Il firmware blocca solo la risorsa AZ e rifiuta se l'asse non è calibrato o è occupato. L'ack riporta la riga motori prima/dopo: `OK|telescope|azRelative|200|AZ +5.0° | prima: … | dopo: … | <risposta>`. Serve per i test dello srotolamento del cavo di alimentazione.
+`cmd|telescope|azRelative|<gradi>` (±0,1…90) ruota solo il motore AZ con la route firmware `POST /v1/motors/goRelative`, body `{"AZ":<gradi>}` (firmato come park/init). Se il firmware risponde `NOT_CALIBRATED` (di giorno l'init fallisce) l'Helper ≥ 0.8.46 calibra solo l'AZ con `POST /v1/motors/seekStop {"AZ":true}` (finecorsa come nel park, braccio chiuso) e riprova. Dalla 0.8.47 la rotazione è asincrona: l'ack `OK|telescope|azRelative|0|avviata +5,0°` arriva subito e l'esito finisce in `cable.lastResult`.
+
+`cmd|telescope|azStop` → `POST /v1/motors/stop {"AZ":true}` (hard stop delle operazioni che usano l'AZ) e interrompe anche lo srotolamento a passi.
+
+### Giri del cavo (Helper ≥ 0.8.47)
+
+L'Helper somma le variazioni dell'AZ (`motors.AZ.position`, ognuna riportata in −180…+180°; campioni ogni 3 s in movimento, 15 s da fermo). Il park (`seekStop` di ALT/AZ/MAP) viene contato come gli altri movimenti. Di giorno, braccio chiuso e telescopio fermo da 5 min, con almeno mezzo giro srotola da solo i giri interi (`−360·round(giri)`) a passi di 90°, una volta al giorno. `cmd|cable|unwind` srotola tutto il conteggio, `cmd|cable|zero` lo azzera (cavo raddrizzato a mano), `cmd|cable|auto|on|off` attiva lo srotolamento automatico.
+Stato in `remote.state.json` → `cable`: `{turnsDeg, turns, auto, busy, activity, lastResult, lastSampleAt, az}`.
 
 ### Piano della notte (Helper â‰¥ 0.8.23)
 

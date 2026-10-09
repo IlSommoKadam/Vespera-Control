@@ -184,6 +184,8 @@ def tel_error_text(ack: str) -> str:
         hint = "Angolo non valido: usa da 0,1° a 90° per comando."
     elif "not_calibrated" in low:
         hint = "Il motore azimutale non è calibrato: fai prima l'Init."
+    elif "azrelative" in low and "busy" in low:
+        hint = "C'è già una rotazione dell'azimut in corso: aspetta o premi «Stop AZ»."
     elif "nessun ack" in low or "helper avviato" in low:
         hint = "Nessuna risposta dall'Helper sul Pi: è avviato? (tab Connessioni → Aggiorna stato)."
     else:
@@ -804,6 +806,22 @@ class App(tk.Tk):
         self._tel_btns["azMinus"].pack(side="left", padx=(0, 6))
         self._tel_btns["azPlus"] = ttk.Button(az_row, text="AZ + ⟳", command=lambda: self.az_rotate(1))
         self._tel_btns["azPlus"].pack(side="left")
+        # Sempre attivo: ferma la rotazione in corso (anche lo srotolamento automatico).
+        ttk.Button(az_row, text="■ Stop AZ", style="Danger.TButton",
+                   command=self.az_stop).pack(side="left", padx=(6, 0))
+        cable_row = ttk.Frame(card, style="Card.TFrame")
+        cable_row.pack(fill="x", pady=(8, 0))
+        self.cable_text = tk.StringVar(value="Cavo: —")
+        ttk.Label(cable_row, textvariable=self.cable_text, style="Card.TLabel",
+                  wraplength=900).pack(anchor="w")
+        cable_btns = ttk.Frame(card, style="Card.TFrame")
+        cable_btns.pack(fill="x", pady=(4, 0))
+        self._cable_unwind_btn = ttk.Button(cable_btns, text="Srotola ora", command=self.cable_unwind)
+        self._cable_unwind_btn.pack(side="left", padx=(0, 6))
+        ttk.Button(cable_btns, text="Cavo dritto: azzera", command=self.cable_zero).pack(side="left", padx=(0, 12))
+        self.cable_auto = tk.BooleanVar(value=True)
+        ttk.Checkbutton(cable_btns, text="Srotola da solo di giorno (a braccio chiuso)",
+                        variable=self.cable_auto, command=self.cable_set_auto).pack(side="left")
         self._update_tel_buttons({})
         ttk.Label(card, text="Stato dettagliato (Helper)", style="Section.TLabel").pack(anchor="w", pady=(12, 4))
         self.tel_details_frame = ttk.Frame(card, style="Card.TFrame")
@@ -2034,7 +2052,69 @@ class App(tk.Tk):
         ):
             self.set_status("Ruota AZ: annullato.", "info")
             return
-        self.cmd(f"cmd|telescope|azRelative|{deg:.2f}", wait=240)
+        self.cmd(f"cmd|telescope|azRelative|{deg:.2f}", wait=45)
+
+    def az_stop(self) -> None:
+        """Stop immediato del motore AZ: fuori dalla coda dei comandi, senza conferma."""
+        def work() -> None:
+            try:
+                bridge = self.ensure_bridge()
+                ack = bridge.send_command("cmd|telescope|azStop", wait_ack=60)
+            except AdbError as exc:
+                ack = f"ERR|telescope|azStop|{exc}"
+            self.queue.put(("log", ack))
+            self.queue.put(("status", ack[:120], "ok" if ack.startswith("OK|") else "err"))
+            self.queue.put(("refresh",))
+
+        self.set_status("Stop AZ…", "info")
+        threading.Thread(target=work, daemon=True).start()
+
+    def cable_unwind(self) -> None:
+        cable = (self.state or {}).get("cable") or {}
+        deg = float(cable.get("turnsDeg") or 0.0)
+        if abs(deg) < 1:
+            messagebox.showinfo("Srotola cavo", "Il cavo risulta già dritto (meno di 1°).", parent=self)
+            return
+        if not messagebox.askokcancel(
+            "Conferma: Srotola ora",
+            f"Il cavo risulta girato di {deg:+.0f}° ({deg / 360:+.2f} giri).\n"
+            f"Ruoto solo l'azimut di {-deg:+.0f}° a passi di 90°.\n\n"
+            "Il telescopio si muove davvero: controlla che nulla ostacoli la rotazione.\n"
+            "Puoi fermarlo con «Stop AZ».",
+            icon="warning", default="cancel", parent=self,
+        ):
+            return
+        self.cmd("cmd|cable|unwind", wait=45)
+
+    def cable_zero(self) -> None:
+        if not messagebox.askyesno(
+            "Cavo dritto",
+            "Confermi che ora il cavo di alimentazione è dritto (non attorcigliato)?\n\n"
+            "Il conteggio dei giri riparte da 0.",
+            parent=self,
+        ):
+            return
+        self.cmd("cmd|cable|zero", wait=30)
+
+    def cable_set_auto(self) -> None:
+        self.cmd("cmd|cable|auto|" + ("on" if self.cable_auto.get() else "off"), wait=30)
+
+    def _apply_cable(self, cable: dict | None) -> None:
+        if not hasattr(self, "cable_text"):
+            return
+        if not cable:
+            self.cable_text.set("Cavo: conteggio non disponibile (aggiorna Vespera Helper ≥ 0.8.47).")
+            self._cable_unwind_btn.state(["disabled"])
+            return
+        deg = float(cable.get("turnsDeg") or 0.0)
+        line = f"Cavo: {deg / 360:+.2f} giri ({deg:+.0f}°)"
+        line += "  ·  auto " + ("sì" if cable.get("auto") else "no")
+        extra = cable.get("activity") or cable.get("lastResult") or ""
+        if extra:
+            line += "  ·  " + extra
+        self.cable_text.set(line)
+        self.cable_auto.set(bool(cable.get("auto", True)))
+        self._cable_unwind_btn.state(["disabled"] if cable.get("busy") else ["!disabled"])
 
     def _update_tel_buttons(self, tel: dict) -> None:
         """Disabilita (in grigio) i comandi che il telescopio ora non può eseguire."""
@@ -2185,6 +2265,7 @@ class App(tk.Tk):
                 self.tel_status_label.pack_forget()
         self._render_tel_details(tel_rows)
         self._update_tel_buttons(tel)
+        self._apply_cable(self.state.get("cable"))
         space = hd.get("spaceLabel") or (f"{hd.get('spacePercent')}%" if hd.get("spaceKnown") else "")
         self.hd_status.set(
             f"{'Montato' if hd.get('mounted') else 'Spento/smontato'}  ·  {hd.get('label') or hd.get('uuid') or '—'}  ·  {space}"
