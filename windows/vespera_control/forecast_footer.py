@@ -70,7 +70,33 @@ class ForecastFooter(tk.Frame):
         self.grid_host.pack(fill="both", expand=True)
         self.panel.bind("<Configure>", self._on_panel_resize)
         top.bind("<Escape>", lambda _e: self.close(), add="+")
+        # Clic fuori dal pannello lo chiude; trascinare a sinistra/destra su footer o pannello cambia giorno.
+        self._press: tuple[int, int, bool, bool] | None = None
+        top.bind("<ButtonPress-1>", self._on_press, add="+")
+        top.bind("<ButtonRelease-1>", self._on_release, add="+")
         self._show_day()
+
+    @staticmethod
+    def _inside(widget, area: tk.Misc) -> bool:
+        path, root = str(widget), str(area)
+        return path == root or path.startswith(root + ".")
+
+    def _on_press(self, event: tk.Event) -> None:
+        on_panel = self._open and self._inside(event.widget, self.panel)
+        keeps_open = on_panel or any(self._inside(event.widget, w) for w in (self.box, self.prev, self.next))
+        swipeable = on_panel or self._inside(event.widget, self)
+        self._press = (event.x_root, event.y_root, swipeable, keeps_open)
+
+    def _on_release(self, event: tk.Event) -> None:
+        press, self._press = self._press, None
+        if not press:
+            return
+        x0, y0, swipeable, keeps_open = press
+        dx, dy = event.x_root - x0, event.y_root - y0
+        if swipeable and abs(dx) >= 60 and abs(dx) > 2 * abs(dy):
+            self._shift(1 if dx < 0 else -1)  # verso sinistra = giorno dopo
+        elif self._open and not keeps_open:
+            self.close()  # clic fuori dal pannello
 
     def _nav(self, text: str, delta: int) -> tk.Label:
         lab = tk.Label(self, text=text, bg=FOOT_BG, fg=NAV_ON, font=("Segoe UI", 18, "bold"),

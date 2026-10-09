@@ -84,7 +84,9 @@ public class MainActivity extends AppCompatActivity {
 
         forecastFooter = new NightForecastFooter(this);
         ((ViewGroup) findViewById(R.id.forecastFooter)).addView(forecastFooter.view());
-        ((ViewGroup) findViewById(R.id.contentFrame)).addView(forecastFooter.panelView());
+        ViewGroup contentFrame = findViewById(R.id.contentFrame);
+        contentFrame.addView(forecastFooter.scrimView());
+        contentFrame.addView(forecastFooter.panelView());
         getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {

@@ -87,7 +87,8 @@ Dalla 0.8.37 l'Helper rilegge la memoria interna via FTP anche senza pannello ap
 
 In fondo ai client: ‹ giorno › fisso e un riquadro con la prima previsione disponibile di quella notte (Open-Meteo);
 solo il riquadro è cliccabile e apre sopra il footer tutte le fasce di 3 h della notte scelta, a griglia (va a capo
-e rimpicciolisce le icone per stare nello schermo, senza scroll). A destra solo il
+e rimpicciolisce le icone per stare nello schermo, senza scroll). Tap/clic fuori dal pannello lo chiude; swipe (o trascinamento)
+a sinistra/destra su footer o pannello = giorno dopo/prima. A destra solo il
 nome del paese. Posizione: quella salvata nel client; se coincide col sito dell'Helper (entro ~0,1°) usano da
 `telescope` il primo pezzo di `siteLabel` e `nightStartHour` / `nightEndHour` (= fine / inizio giornata del sito;
 default 19 → 10), altrimenti il nome viene dal reverse geocoding (BigDataCloud).

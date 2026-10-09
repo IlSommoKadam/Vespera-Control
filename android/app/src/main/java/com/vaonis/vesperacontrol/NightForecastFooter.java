@@ -7,7 +7,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
+import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
@@ -82,6 +84,8 @@ final class NightForecastFooter {
     private final TextView boxArrow;
     private final TextView placeLabelView;
     private final LinearLayout panel;
+    /** Sfondo trasparente sotto il pannello: un tap fuori dal pannello lo chiude. */
+    private final View scrim;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Runnable refreshTick = this::refresh;
@@ -172,9 +176,53 @@ final class NightForecastFooter {
                 Gravity.BOTTOM);
         panelLp.setMargins(dp(8), 0, dp(8), dp(6));
         panel.setLayoutParams(panelLp);
+        scrim = new View(context);
+        scrim.setLayoutParams(new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        scrim.setVisibility(View.GONE);
+        scrim.setOnClickListener(v -> close());
+
+        // Swipe a sinistra/destra su footer o pannello: giorno dopo / prima.
+        // Un tap sul footer (fuori da riquadro e frecce) chiude; un tap dentro il pannello no.
+        GestureDetector footerSwipe = swipeDetector(context, true);
+        GestureDetector panelSwipe = swipeDetector(context, false);
+        root.setOnTouchListener((v, e) -> {
+            footerSwipe.onTouchEvent(e);
+            return true;
+        });
+        panel.setOnTouchListener((v, e) -> {
+            panelSwipe.onTouchEvent(e);
+            return true;
+        });
+
         // Rotazione / finestra ridimensionata: ricalcola colonne e dimensione icone.
         panel.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             if (open && r - l != laidOutWidth) mainHandler.post(this::fillPanel);
+        });
+    }
+
+    private GestureDetector swipeDetector(Context context, boolean tapCloses) {
+        return new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onDown(MotionEvent e) {
+                return true;
+            }
+
+            @Override
+            public boolean onSingleTapUp(MotionEvent e) {
+                if (tapCloses) close();
+                return true;
+            }
+
+            @Override
+            public boolean onFling(MotionEvent down, MotionEvent up, float vx, float vy) {
+                if (down == null) return false;
+                float dx = up.getX() - down.getX();
+                float dy = up.getY() - down.getY();
+                if (Math.abs(dx) < dp(40) || Math.abs(dx) < 2 * Math.abs(dy)) return false;
+                shiftDay(dx < 0 ? 1 : -1); // verso sinistra = giorno dopo
+                return true;
+            }
         });
     }
 
@@ -208,6 +256,11 @@ final class NightForecastFooter {
         return b;
     }
 
+    /** Sfondo trasparente da mettere nel FrameLayout prima del pannello (tap fuori = chiudi). */
+    View scrimView() {
+        return scrim;
+    }
+
     /** Il footer. */
     View view() {
         return root;
@@ -239,6 +292,7 @@ final class NightForecastFooter {
         } else if (!nights.isEmpty()) {
             open = true;
             boxArrow.setText("▼");
+            scrim.setVisibility(View.VISIBLE);
             panel.setVisibility(View.VISIBLE);
             fillPanel();
         }
@@ -248,6 +302,7 @@ final class NightForecastFooter {
     boolean close() {
         if (!open) return false;
         open = false;
+        scrim.setVisibility(View.GONE);
         panel.setVisibility(View.GONE);
         boxArrow.setText("▲");
         return true;
