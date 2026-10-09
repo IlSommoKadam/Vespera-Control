@@ -6,11 +6,11 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -32,9 +32,10 @@ import java.util.concurrent.Executors;
 
 /**
  * Footer meteo dell'app (stessi dati di NightForecastFooter di Vespera Helper).
- * Chiuso: riquadro con la prima previsione della sera e ▲, a destra il nome del paese.
- * Un tap sul riquadro apre sopra il footer una barra sovrapposta con l'evoluzione della notte
- * (‹ giorno ›, fasce di 3 h fino all'alba); un altro tap (o Indietro) la chiude.
+ * Footer: ‹ giorno › fisso, un riquadro con la prima previsione disponibile di quella notte (▲)
+ * e il nome del paese. Solo il riquadro è cliccabile: apre sopra il footer tutte le fasce di 3 h
+ * della notte scelta, a griglia così da stare nello schermo senza scorrere (icone più piccole se
+ * serve). Un altro tap (o Indietro) chiude.
  */
 final class NightForecastFooter {
     private static final long REFRESH_MS = 30 * 60 * 1000L;
@@ -73,15 +74,14 @@ final class NightForecastFooter {
     private final Context app;
     private final float density;
     private final LinearLayout root;
+    private final Button prevDay;
+    private final Button nextDay;
+    private final TextView dayLabel;
     private final ImageView boxIcon;
     private final TextView boxText;
     private final TextView boxArrow;
     private final TextView placeLabelView;
     private final LinearLayout panel;
-    private final Button prevDay;
-    private final Button nextDay;
-    private final TextView dayLabel;
-    private final LinearLayout slotsRow;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Runnable refreshTick = this::refresh;
@@ -94,19 +94,33 @@ final class NightForecastFooter {
     private String loadedKey = "";
     private boolean started;
     private boolean open;
+    private int laidOutWidth = -1;
 
     NightForecastFooter(Context context) {
         this.app = context.getApplicationContext();
         this.density = context.getResources().getDisplayMetrics().density;
 
-        // --- barra in fondo: riquadro meteo + paese
+        // --- footer: ‹ giorno ›  [riquadro]  ...  paese
         root = new LinearLayout(context);
         root.setOrientation(LinearLayout.HORIZONTAL);
         root.setGravity(Gravity.CENTER_VERTICAL);
         root.setBackgroundColor(0xFFE8EEF4);
-        root.setPadding(dp(8), dp(5), dp(12), dp(5));
+        root.setPadding(dp(2), dp(4), dp(12), dp(4));
         root.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        prevDay = navButton(context, "‹");
+        prevDay.setOnClickListener(v -> shiftDay(-1));
+        root.addView(prevDay);
+        dayLabel = new TextView(context);
+        dayLabel.setTextSize(15);
+        dayLabel.setTypeface(dayLabel.getTypeface(), Typeface.BOLD);
+        dayLabel.setTextColor(TEXT);
+        dayLabel.setMaxLines(1);
+        root.addView(dayLabel);
+        nextDay = navButton(context, "›");
+        nextDay.setOnClickListener(v -> shiftDay(1));
+        root.addView(nextDay);
 
         LinearLayout box = new LinearLayout(context);
         box.setOrientation(LinearLayout.HORIZONTAL);
@@ -129,25 +143,28 @@ final class NightForecastFooter {
         boxArrow.setTextSize(13);
         boxArrow.setTextColor(NAV_ON);
         box.addView(boxArrow);
-        root.addView(box, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        root.addView(new View(context), new LinearLayout.LayoutParams(0, 1, 1f));
+        LinearLayout.LayoutParams boxLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        boxLp.setMarginStart(dp(4));
+        root.addView(box, boxLp);
 
+        // Il nome del paese prende lo spazio che resta (troncato se lo schermo è stretto).
         placeLabelView = new TextView(context);
         placeLabelView.setTextSize(15);
         placeLabelView.setTypeface(placeLabelView.getTypeface(), Typeface.BOLD);
         placeLabelView.setTextColor(TEXT);
         placeLabelView.setMaxLines(1);
+        placeLabelView.setEllipsize(TextUtils.TruncateAt.END);
+        placeLabelView.setGravity(Gravity.END);
         placeLabelView.setPadding(dp(8), 0, 0, 0);
-        root.addView(placeLabelView);
+        root.addView(placeLabelView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        // --- barra sovrapposta (MainActivity la mette sopra il contenuto, in basso)
+        // --- pannello sovrapposto (MainActivity lo mette sopra il contenuto, in basso)
         panel = new LinearLayout(context);
-        panel.setOrientation(LinearLayout.HORIZONTAL);
-        panel.setGravity(Gravity.CENTER_VERTICAL);
+        panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackground(card());
         panel.setElevation(dp(6));
-        panel.setPadding(dp(4), dp(6), dp(8), dp(6));
+        panel.setPadding(dp(8), dp(6), dp(8), dp(6));
         panel.setVisibility(View.GONE);
         panel.setClickable(true); // i tap non passano al contenuto sotto
         FrameLayout.LayoutParams panelLp = new FrameLayout.LayoutParams(
@@ -155,32 +172,10 @@ final class NightForecastFooter {
                 Gravity.BOTTOM);
         panelLp.setMargins(dp(8), 0, dp(8), dp(6));
         panel.setLayoutParams(panelLp);
-
-        prevDay = navButton(context, "‹");
-        prevDay.setOnClickListener(v -> shiftDay(-1));
-        panel.addView(prevDay);
-        dayLabel = new TextView(context);
-        dayLabel.setTextSize(16);
-        dayLabel.setTypeface(dayLabel.getTypeface(), Typeface.BOLD);
-        dayLabel.setTextColor(TEXT);
-        dayLabel.setMaxLines(1);
-        dayLabel.setPadding(dp(4), 0, dp(6), 0);
-        panel.addView(dayLabel);
-        nextDay = navButton(context, "›");
-        nextDay.setOnClickListener(v -> shiftDay(1));
-        panel.addView(nextDay);
-
-        HorizontalScrollView scroll = new HorizontalScrollView(context);
-        scroll.setHorizontalScrollBarEnabled(false);
-        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        scrollLp.setMarginStart(dp(6));
-        scroll.setLayoutParams(scrollLp);
-        slotsRow = new LinearLayout(context);
-        slotsRow.setOrientation(LinearLayout.HORIZONTAL);
-        slotsRow.setGravity(Gravity.CENTER_VERTICAL);
-        scroll.addView(slotsRow);
-        panel.addView(scroll);
+        // Rotazione / finestra ridimensionata: ricalcola colonne e dimensione icone.
+        panel.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (open && r - l != laidOutWidth) mainHandler.post(this::fillPanel);
+        });
     }
 
     private int dp(float value) {
@@ -198,7 +193,7 @@ final class NightForecastFooter {
     private Button navButton(Context context, String label) {
         Button b = new Button(context);
         b.setText(label);
-        b.setTextSize(30);
+        b.setTextSize(26);
         b.setTypeface(Typeface.DEFAULT_BOLD);
         b.setAllCaps(false);
         b.setMinWidth(0);
@@ -213,12 +208,12 @@ final class NightForecastFooter {
         return b;
     }
 
-    /** La barra in fondo. */
+    /** Il footer. */
     View view() {
         return root;
     }
 
-    /** La barra sovrapposta: va in un FrameLayout sopra il contenuto (gravity bottom già impostata). */
+    /** Il pannello sovrapposto: va in un FrameLayout sopra il contenuto (gravity bottom già impostata). */
     View panelView() {
         return panel;
     }
@@ -243,12 +238,13 @@ final class NightForecastFooter {
             close();
         } else if (!nights.isEmpty()) {
             open = true;
-            panel.setVisibility(View.VISIBLE);
             boxArrow.setText("▼");
+            panel.setVisibility(View.VISIBLE);
+            fillPanel();
         }
     }
 
-    /** Chiude la barra sovrapposta; true se era aperta (per il tasto Indietro). */
+    /** Chiude il pannello; true se era aperto (per il tasto Indietro). */
     boolean close() {
         if (!open) return false;
         open = false;
@@ -273,10 +269,10 @@ final class NightForecastFooter {
             nights = new ArrayList<>();
             nightIndex = 0;
             close();
-            showBox(app.getString(R.string.forecast_footer_no_site));
+            showDay(app.getString(R.string.forecast_footer_no_site));
             return;
         }
-        if (nights.isEmpty()) showBox(app.getString(R.string.forecast_footer_loading));
+        if (nights.isEmpty()) showDay(app.getString(R.string.forecast_footer_loading));
         final String key = siteKey();
         final double lat = DevicePrefs.getLat(app);
         final double lon = DevicePrefs.getLon(app);
@@ -320,22 +316,21 @@ final class NightForecastFooter {
             nights = new ArrayList<>();
             nightIndex = 0;
             close();
-            showBox(friendlyError(err));
+            showDay(friendlyError(err));
             return;
         }
         loadedKey = key;
         zone = tz;
         nights = fetched;
         if (nightIndex >= nights.size()) nightIndex = 0;
-        showBox(null);
-        bindCurrentNight();
+        showDay(null);
     }
 
     private void shiftDay(int delta) {
         int next = nightIndex + delta;
         if (next < 0 || next >= nights.size()) return;
         nightIndex = next;
-        bindCurrentNight();
+        showDay(null);
     }
 
     /** Solo il paese/città: nome dell'Helper («Adelfia, Bari» → «Adelfia») o reverse geocoding. */
@@ -353,27 +348,23 @@ final class NightForecastFooter {
         placeLabelView.setText(placeLabel());
     }
 
-    /** Riquadro: il messaggio, oppure (null) la prima previsione ancora utile della notte. */
-    private void showBox(String message) {
-        Slot slot = null;
-        if (message == null && !nights.isEmpty()) {
-            List<Slot> slots = nights.get(0).slots;
-            long from = System.currentTimeMillis() - 90 * 60_000L;
-            for (Slot s : slots) {
-                if (s.epochMs >= from) {
-                    slot = s;
-                    break;
-                }
-            }
-            if (slot == null && !slots.isEmpty()) slot = slots.get(0);
-        }
-        if (slot == null) {
+    /** Giorno scelto + riquadro con la sua prima previsione; con un messaggio, solo il messaggio. */
+    private void showDay(String message) {
+        Night night = message == null && !nights.isEmpty() ? nights.get(nightIndex) : null;
+        prevDay.setEnabled(night != null && nightIndex > 0);
+        nextDay.setEnabled(night != null && nightIndex + 1 < nights.size());
+        prevDay.setTextColor(prevDay.isEnabled() ? NAV_ON : NAV_OFF);
+        nextDay.setTextColor(nextDay.isEnabled() ? NAV_ON : NAV_OFF);
+        if (night == null) {
+            dayLabel.setText("");
             boxIcon.setVisibility(View.GONE);
             boxArrow.setVisibility(View.GONE);
             boxText.setTextColor(TEXT);
             boxText.setText(message == null ? "" : message);
             return;
         }
+        dayLabel.setText(dayCaption(night.startMs));
+        Slot slot = firstSlot(night);
         SimpleDateFormat fmt = new SimpleDateFormat("HH:mm", Locale.getDefault());
         fmt.setTimeZone(zone);
         String meta = slotMeta(slot);
@@ -381,72 +372,95 @@ final class NightForecastFooter {
         boxIcon.setVisibility(View.VISIBLE);
         boxArrow.setVisibility(View.VISIBLE);
         boxText.setTextColor(slot.precipitationMm >= 0.05d ? RAIN : TEXT);
-        boxText.setText(firstLabel(slot.epochMs) + " " + fmt.format(new Date(slot.epochMs))
-                + (meta.isEmpty() ? "" : " · " + meta));
+        boxText.setText(fmt.format(new Date(slot.epochMs)) + (meta.isEmpty() ? "" : " · " + meta));
+        if (open) fillPanel();
     }
 
-    /** «Stasera» (dalle 18 di oggi), «Stanotte» (dopo mezzanotte), altrimenti Oggi/Domani/Notte. */
-    private String firstLabel(long epochMs) {
-        Calendar slot = Calendar.getInstance(zone);
-        slot.setTimeInMillis(epochMs);
-        int hour = slot.get(Calendar.HOUR_OF_DAY);
-        clearTime(slot);
-        Calendar today = Calendar.getInstance(zone);
-        clearTime(today);
-        int days = (int) Math.round((slot.getTimeInMillis() - today.getTimeInMillis()) / 86_400_000d);
-        if (days == 0) {
-            return app.getString(hour >= 18 ? R.string.forecast_first_evening : R.string.forecast_day_today);
+    /** Prima previsione ancora disponibile (per stanotte salta le fasce già passate). */
+    private static Slot firstSlot(Night night) {
+        long since = System.currentTimeMillis() - 90 * 60_000L;
+        for (Slot s : night.slots) {
+            if (s.epochMs >= since) return s;
         }
-        if (days == 1 && hour < 12) return app.getString(R.string.forecast_first_night);
-        if (days == 1) return app.getString(R.string.forecast_day_tomorrow);
-        return app.getString(R.string.forecast_first_later);
+        return night.slots.get(0);
     }
 
-    private void bindCurrentNight() {
-        slotsRow.removeAllViews();
-        if (nights.isEmpty() || nightIndex < 0 || nightIndex >= nights.size()) {
-            dayLabel.setText("");
-            updateNavEnabled();
+    /** Tutte le fasce della notte scelta, a griglia: tante colonne quante ne stanno, poi a capo. */
+    private void fillPanel() {
+        if (!open || nights.isEmpty()) return;
+        View parent = (View) panel.getParent();
+        int width = (parent != null && parent.getWidth() > 0 ? parent.getWidth() : root.getWidth())
+                - dp(16) - panel.getPaddingLeft() - panel.getPaddingRight();
+        if (width <= 0) {
+            panel.post(this::fillPanel);
             return;
         }
+        laidOutWidth = width + panel.getPaddingLeft() + panel.getPaddingRight();
         Night night = nights.get(nightIndex);
-        dayLabel.setText(dayCaption(night.startMs));
+        List<View> cells = makeCells(night, 28, 16, 14);
+        int cellW = widest(cells) + dp(8);
+        if (cellW * cells.size() > width) {
+            cells = makeCells(night, 22, 14, 12);
+            cellW = widest(cells) + dp(6);
+        }
+        int cols = Math.max(1, Math.min(cells.size(), width / Math.max(1, cellW)));
+        panel.removeAllViews();
+        LinearLayout row = null;
+        for (int i = 0; i < cells.size(); i++) {
+            if (i % cols == 0) {
+                row = new LinearLayout(root.getContext());
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setPadding(0, dp(2), 0, dp(2));
+                panel.addView(row, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            }
+            row.addView(cells.get(i), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        // Ultima riga incompleta: celle vuote così le colonne restano allineate.
+        int rest = cells.size() % cols;
+        for (int i = rest == 0 ? cols : rest; i < cols && row != null; i++) {
+            row.addView(new View(root.getContext()), new LinearLayout.LayoutParams(0, 1, 1f));
+        }
+    }
+
+    private int widest(List<View> cells) {
+        int max = 0;
+        for (View c : cells) {
+            c.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+            max = Math.max(max, c.getMeasuredWidth());
+        }
+        return max;
+    }
+
+    private List<View> makeCells(Night night, int iconDp, int timeSp, int metaSp) {
         SimpleDateFormat fmt = new SimpleDateFormat("HH:mm", Locale.getDefault());
         fmt.setTimeZone(zone);
-        int gap = dp(8);
-        for (int i = 0; i < night.slots.size(); i++) {
-            Slot slot = night.slots.get(i);
+        List<View> cells = new ArrayList<>();
+        for (Slot slot : night.slots) {
             LinearLayout cell = new LinearLayout(root.getContext());
             cell.setOrientation(LinearLayout.HORIZONTAL);
             cell.setGravity(Gravity.CENTER_VERTICAL);
-            cell.setPadding(dp(5), 0, dp(5), 0);
-            LinearLayout.LayoutParams cellLp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            if (i > 0) cellLp.setMarginStart(gap);
-            cell.setLayoutParams(cellLp);
 
             ImageView icon = new ImageView(root.getContext());
             icon.setImageResource(iconFor(slot.weatherCode));
-            icon.setLayoutParams(new LinearLayout.LayoutParams(dp(28), dp(28)));
+            icon.setLayoutParams(new LinearLayout.LayoutParams(dp(iconDp), dp(iconDp)));
             cell.addView(icon);
 
             LinearLayout texts = new LinearLayout(root.getContext());
             texts.setOrientation(LinearLayout.VERTICAL);
-            texts.setGravity(Gravity.CENTER_VERTICAL);
             texts.setPadding(dp(4), 0, 0, 0);
-
             TextView time = new TextView(root.getContext());
             time.setText(fmt.format(new Date(slot.epochMs)));
-            time.setTextSize(16);
+            time.setTextSize(timeSp);
             time.setTypeface(time.getTypeface(), Typeface.BOLD);
             time.setTextColor(0xFF1A237E);
+            time.setMaxLines(1);
             texts.addView(time);
-
             String meta = slotMeta(slot);
             if (!meta.isEmpty()) {
                 TextView detail = new TextView(root.getContext());
                 detail.setText(meta);
-                detail.setTextSize(14);
+                detail.setTextSize(metaSp);
                 detail.setTypeface(detail.getTypeface(), Typeface.BOLD);
                 detail.setMaxLines(1);
                 detail.setIncludeFontPadding(false);
@@ -454,16 +468,9 @@ final class NightForecastFooter {
                 texts.addView(detail);
             }
             cell.addView(texts);
-            slotsRow.addView(cell);
+            cells.add(cell);
         }
-        updateNavEnabled();
-    }
-
-    private void updateNavEnabled() {
-        prevDay.setEnabled(nightIndex > 0);
-        nextDay.setEnabled(nightIndex + 1 < nights.size());
-        prevDay.setTextColor(prevDay.isEnabled() ? NAV_ON : NAV_OFF);
-        nextDay.setTextColor(nextDay.isEnabled() ? NAV_ON : NAV_OFF);
+        return cells;
     }
 
     // ------------------------------------------------------------------ Open-Meteo (come OpenMeteoClient.fetchNightSlots)

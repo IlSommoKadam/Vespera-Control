@@ -85,8 +85,9 @@ Dalla 0.8.37 l'Helper rilegge la memoria interna via FTP anche senza pannello ap
 
 ### Footer meteo (Control ≥ 0.2.53, Helper ≥ 0.8.48)
 
-In fondo ai client: un riquadro con la prima previsione della sera (Open-Meteo) e ▲; un tap apre sopra il footer
-una barra con l'evoluzione della notte a fasce di 3 h (‹ giorno ›), come il footer dell'Helper. A destra solo il
+In fondo ai client: ‹ giorno › fisso e un riquadro con la prima previsione disponibile di quella notte (Open-Meteo);
+solo il riquadro è cliccabile e apre sopra il footer tutte le fasce di 3 h della notte scelta, a griglia (va a capo
+e rimpicciolisce le icone per stare nello schermo, senza scroll). A destra solo il
 nome del paese. Posizione: quella salvata nel client; se coincide col sito dell'Helper (entro ~0,1°) usano da
 `telescope` il primo pezzo di `siteLabel` e `nightStartHour` / `nightEndHour` (= fine / inizio giornata del sito;
 default 19 → 10), altrimenti il nome viene dal reverse geocoding (BigDataCloud).

@@ -270,9 +270,6 @@
     <string name="forecast_footer_error">Meteo non raggiungibile</string>
     <string name="forecast_footer_no_route">Meteo: senza Internet</string>
     <string name="forecast_footer_timeout">Meteo: timeout</string>
-    <string name="forecast_first_evening">Stasera</string>
-    <string name="forecast_first_night">Stanotte</string>
-    <string name="forecast_first_later">Notte</string>
     <string name="forecast_day_today">Oggi</string>
     <string name="forecast_day_tomorrow">Domani</string>
     <string name="forecast_day_after_tomorrow">Dopodomani</string>

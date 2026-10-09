@@ -1,14 +1,15 @@
 """Footer meteo della finestra (stessi dati di NightForecastFooter in Vespera Helper).
 
-Chiuso: un riquadro con la prima previsione della sera e ▲, a destra il nome del paese.
-Un clic sul riquadro apre sopra il footer una barra sovrapposta con l'evoluzione della notte
-(‹ giorno ›, fasce di 3 h fino all'alba); un altro clic (o Esc) la chiude.
+Footer: ‹ giorno › fisso, un riquadro con la prima previsione disponibile di quella notte (▲) e il nome
+del paese. Solo il riquadro è cliccabile: apre sopra il footer tutte le fasce di 3 h della notte
+scelta, disposte a griglia così da stare nella finestra senza scorrere (icone più piccole se serve).
+Un altro clic (o Esc) chiude.
 """
 from __future__ import annotations
 
 import threading
 import tkinter as tk
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from vespera_control import night_forecast as nf
 
@@ -21,11 +22,12 @@ TIME = "#1A237E"
 RAIN = "#1565C0"
 NAV_ON = "#1565C0"
 NAV_OFF = "#B0BEC5"
+GAP = 10
 
 
 class ForecastFooter(tk.Frame):
     def __init__(self, master: tk.Misc) -> None:
-        super().__init__(master, bg=FOOT_BG, padx=16, pady=5)
+        super().__init__(master, bg=FOOT_BG, padx=12, pady=4)
         self._site: tuple[float, float] | None = None
         self._label = ""
         self._town = ""
@@ -36,11 +38,18 @@ class ForecastFooter(tk.Frame):
         self._after: str | None = None
         self._icons: dict[str, object] = {}
         self._open = False
+        self._layout_key: tuple | None = None
 
-        # Riquadro meteo (cliccabile)
+        # ‹ giorno ›  (fisso)
+        self.prev = self._nav("‹", -1)
+        self.day = tk.Label(self, bg=FOOT_BG, fg=TEXT, font=("Segoe UI", 11, "bold"), padx=2)
+        self.day.pack(side="left")
+        self.next = self._nav("›", 1)
+
+        # Riquadro con la prima previsione: l'unica parte cliccabile
         self.box = tk.Frame(self, bg=BOX_BG, highlightthickness=1, highlightbackground=BOX_BORDER,
                             padx=8, pady=3, cursor="hand2")
-        self.box.pack(side="left")
+        self.box.pack(side="left", padx=(8, 0))
         self.box_icon = tk.Label(self.box, bg=BOX_BG)
         self.box_icon.pack(side="left")
         self.box_text = tk.Label(self.box, bg=BOX_BG, fg=TEXT, font=("Segoe UI", 10, "bold"), padx=6)
@@ -53,22 +62,19 @@ class ForecastFooter(tk.Frame):
         self.place_label = tk.Label(self, bg=FOOT_BG, fg=TEXT, font=("Segoe UI", 10, "bold"))
         self.place_label.pack(side="right")
 
-        # Barra sovrapposta con l'evoluzione della notte (posizionata sopra il footer)
+        # Pannello sovrapposto con tutte le fasce della notte scelta
         top = self.winfo_toplevel()
         self.panel = tk.Frame(top, bg=BOX_BG, highlightthickness=1, highlightbackground=BOX_BORDER,
-                              padx=8, pady=6)
-        self.prev = self._nav("‹", -1)
-        self.day = tk.Label(self.panel, bg=BOX_BG, fg=TEXT, font=("Segoe UI", 11, "bold"), padx=4)
-        self.day.pack(side="left")
-        self.next = self._nav("›", 1)
-        self.slots = tk.Frame(self.panel, bg=BOX_BG)
-        self.slots.pack(side="left", fill="x", expand=True, padx=(8, 0))
+                              padx=10, pady=8)
+        self.grid_host = tk.Frame(self.panel, bg=BOX_BG)
+        self.grid_host.pack(fill="both", expand=True)
+        self.panel.bind("<Configure>", self._on_panel_resize)
         top.bind("<Escape>", lambda _e: self.close(), add="+")
-        self._show_box()
+        self._show_day()
 
     def _nav(self, text: str, delta: int) -> tk.Label:
-        lab = tk.Label(self.panel, text=text, bg=BOX_BG, fg=NAV_ON, font=("Segoe UI", 20, "bold"),
-                       padx=6, cursor="hand2")
+        lab = tk.Label(self, text=text, bg=FOOT_BG, fg=NAV_ON, font=("Segoe UI", 18, "bold"),
+                       padx=4, cursor="hand2")
         lab.pack(side="left")
         lab.bind("<Button-1>", lambda _e: self._shift(delta))
         return lab
@@ -92,13 +98,18 @@ class ForecastFooter(tk.Frame):
             self.open()
 
     def open(self) -> None:
-        if not self._result or not self._result.nights:
+        if not self._night():
             return
         self._open = True
-        self.update_idletasks()
-        self.panel.place(x=16, rely=1.0, y=-(self.winfo_height() + 2), anchor="sw", relwidth=1.0, width=-32)
-        self.panel.lift()
+        self._place_panel()
         self.box_arrow.configure(text="▼")
+
+    def _place_panel(self) -> None:
+        self.update_idletasks()
+        self._layout_key = None
+        self.panel.place(x=12, rely=1.0, y=-(self.winfo_height() + 2), anchor="sw", relwidth=1.0, width=-24)
+        self.panel.lift()
+        self._fill_panel()
 
     def close(self) -> None:
         self._open = False
@@ -135,10 +146,10 @@ class ForecastFooter(tk.Frame):
             self._result = None
             self._index = 0
             self.close()
-            self._show_box("Imposta la posizione in Impostazioni per il meteo")
+            self._show_day("Imposta la posizione in Impostazioni per il meteo")
             return
         if self._result is None:
-            self._show_box("Aggiornamento meteo…")
+            self._show_day("Aggiornamento meteo…")
         lat, lon = self._site
         start_h, end_h = self._hours
         need_town = not self._label and not self._town
@@ -171,34 +182,52 @@ class ForecastFooter(tk.Frame):
             if self._result is not None and self._result.nights:
                 return  # tieni l'ultimo aggiornamento buono
             self.close()
-            self._show_box(nf.friendly_error(result.error))
+            self._show_day(nf.friendly_error(result.error))
             return
         self._result = result
         if self._index >= len(result.nights):
             self._index = 0
-        self._show_box()
-        self._bind_night()
+        self._show_day()
 
     # ------------------------------------------------------------------ vista
+
+    def _night(self) -> nf.Night | None:
+        if not self._result or not self._result.nights:
+            return None
+        return self._result.nights[self._index]
+
+    def _first_slot(self, night: nf.Night) -> nf.Slot:
+        """Prima previsione ancora disponibile (per stanotte salta le fasce già passate)."""
+        since = self._result.now - timedelta(hours=1, minutes=30)
+        upcoming = [s for s in night.slots if s.when >= since]
+        return upcoming[0] if upcoming else night.slots[0]
 
     def _show_place(self) -> None:
         self.place_label.configure(text=self._label or self._town)
 
-    def _show_box(self, message: str = "") -> None:
-        first = nf.first_slot(self._result) if self._result and not message else None
-        if first is None:
+    def _show_day(self, message: str = "") -> None:
+        """Giorno scelto nel footer + riquadro con la sua prima previsione."""
+        night = None if message else self._night()
+        count = len(self._result.nights) if self._result else 0
+        self.prev.configure(fg=NAV_ON if night and self._index > 0 else NAV_OFF)
+        self.next.configure(fg=NAV_ON if night and self._index + 1 < count else NAV_OFF)
+        if night is None:
+            self.day.configure(text="")
             self.box_icon.configure(image="")
             self.box_icon.pack_forget()
-            self.box_text.configure(text=message, fg=TEXT)
             self.box_arrow.pack_forget()
+            self.box_text.configure(text=message, fg=TEXT)
             return
-        label, slot = first
+        self.day.configure(text=nf.day_caption(night.start, self._result.now))
+        slot = self._first_slot(night)
         self.box_icon.configure(image=self._icon(nf.kind(slot.code), 22) or "")
         self.box_icon.pack(side="left", before=self.box_text)
         meta = nf.slot_meta(slot)
-        self.box_text.configure(text=f"{label} {slot.when:%H:%M}" + (f" · {meta}" if meta else ""),
+        self.box_text.configure(text=f"{slot.when:%H:%M}" + (f" · {meta}" if meta else ""),
                                 fg=RAIN if slot.mm >= 0.05 else TEXT)
         self.box_arrow.pack(side="left")
+        if self._open:
+            self._place_panel()
 
     def _shift(self, delta: int) -> None:
         if not self._result or not self._result.nights:
@@ -206,25 +235,67 @@ class ForecastFooter(tk.Frame):
         nxt = self._index + delta
         if 0 <= nxt < len(self._result.nights):
             self._index = nxt
-            self._bind_night()
+            self._show_day()
 
-    def _bind_night(self) -> None:
-        for child in self.slots.winfo_children():
+    def _on_panel_resize(self, event: tk.Event) -> None:
+        """Larghezza cambiata: ricalcola dimensione delle icone e colonne."""
+        if self._open and event.width != getattr(self, "_panel_w", None):
+            self._panel_w = event.width
+            self._fill_panel()
+
+    def _fill_panel(self) -> None:
+        """Crea le celle della notte scelta (grandi, o piccole se non stanno in una riga)."""
+        night = self._night()
+        if night is None:
+            return
+        self.update_idletasks()
+        width = max(200, self.panel.winfo_width() - 24)
+        big = self._make_cells(night, 28, 11, 9)
+        cell_w = max(c.winfo_reqwidth() for c in big) + GAP
+        cells = big
+        if cell_w * len(big) > width:
+            for c in big:
+                c.destroy()
+            cells = self._make_cells(night, 20, 10, 8)
+            cell_w = max(c.winfo_reqwidth() for c in cells) + GAP
+        self._cells = cells
+        self._cell_w = cell_w
+        self._layout_key = None
+        self._layout_cells()
+
+    def _make_cells(self, night: nf.Night, icon: int, time_pt: int, meta_pt: int) -> list[tk.Frame]:
+        for child in self.grid_host.winfo_children():
             child.destroy()
-        night = self._result.nights[self._index]
-        self.day.configure(text=nf.day_caption(night.start, self._result.now))
-        for i, slot in enumerate(night.slots):
-            cell = tk.Frame(self.slots, bg=BOX_BG)
-            cell.pack(side="left", padx=(0 if i == 0 else 10, 0))
-            tk.Label(cell, image=self._icon(nf.kind(slot.code)) or "", bg=BOX_BG).pack(side="left")
+        cells = []
+        for slot in night.slots:
+            cell = tk.Frame(self.grid_host, bg=BOX_BG)
+            tk.Label(cell, image=self._icon(nf.kind(slot.code), icon) or "", bg=BOX_BG).pack(side="left")
             texts = tk.Frame(cell, bg=BOX_BG)
             texts.pack(side="left", padx=(4, 0))
             tk.Label(texts, text=f"{slot.when:%H:%M}", bg=BOX_BG, fg=TIME,
-                     font=("Segoe UI", 11, "bold")).pack(anchor="w")
+                     font=("Segoe UI", time_pt, "bold")).pack(anchor="w")
             meta = nf.slot_meta(slot)
             if meta:
                 tk.Label(texts, text=meta, bg=BOX_BG, fg=RAIN if slot.mm >= 0.05 else TEXT,
-                         font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        count = len(self._result.nights)
-        self.prev.configure(fg=NAV_ON if self._index > 0 else NAV_OFF)
-        self.next.configure(fg=NAV_ON if self._index + 1 < count else NAV_OFF)
+                         font=("Segoe UI", meta_pt, "bold")).pack(anchor="w")
+            cells.append(cell)
+        self.update_idletasks()
+        return cells
+
+    def _layout_cells(self) -> None:
+        """Griglia: tante colonne quante ne stanno, il resto va a capo (niente scroll)."""
+        cells = getattr(self, "_cells", None)
+        if not self._open or not cells:
+            return
+        width = max(200, self.panel.winfo_width() - 24)
+        cols = max(1, min(len(cells), width // self._cell_w))
+        key = (cols, len(cells))
+        if key == self._layout_key:
+            return
+        self._layout_key = key
+        for c in range(len(cells)):
+            self.grid_host.columnconfigure(c, weight=0, minsize=0)
+        for c in range(cols):
+            self.grid_host.columnconfigure(c, minsize=self._cell_w)
+        for i, cell in enumerate(cells):
+            cell.grid(row=i // cols, column=i % cols, sticky="w", pady=2)
