@@ -177,15 +177,14 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         bindTelButton(view, R.id.btnGoto, "resume", v -> confirmTelescope("resume"));
         bindTelButton(view, R.id.btnShutdown, "shutdown", v -> confirmTelescope("shutdown"));
         editAzStep = view.findViewById(R.id.editAzStep);
-        bindTelButton(view, R.id.btnAzMinus, "azRelative", v -> confirmMotorMove("-"));
-        bindTelButton(view, R.id.btnAzPlus, "azRelative", v -> confirmMotorMove("+"));
-        bindTelButton(view, R.id.btnMotorGoto, "azRelative", v -> confirmMotorMove("abs"));
+        // "Vai" attivo solo a telescopio fermo: vedi updateTelButtons / motionBusy.
+        bindTelButton(view, R.id.btnMotorGo, "azRelative", v -> confirmMotorMove(
+                radioModeAbs != null && radioModeAbs.isChecked() ? "abs" : "rel"));
+        radioModeAbs = view.findViewById(R.id.radioModeAbs);
         textMotorPos = view.findViewById(R.id.textMotorPos);
         radioAxisAlt = view.findViewById(R.id.radioAxisAlt);
         view.<Button>findViewById(R.id.btnAzStop).setOnClickListener(v -> sendAzStop());
         textCable = view.findViewById(R.id.textCable);
-        btnCableUnwind = view.findViewById(R.id.btnCableUnwind);
-        btnCableUnwind.setOnClickListener(v -> confirmCableUnwind());
         view.<Button>findViewById(R.id.btnCableZero).setOnClickListener(v -> confirmCableZero());
         checkCableAuto = view.findViewById(R.id.checkCableAuto);
         checkCableAuto.setOnClickListener(v -> sendCableLine(
@@ -1333,10 +1332,18 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         return out;
     }
 
+    /** Movimento in corso: rotazione dell'Helper, braccio in movimento o posizione appena cambiata. */
+    private boolean motionBusy() {
+        if (cableBusy) return true;
+        if (lastTelescopeJson != null && "MOVING".equals(lastTelescopeJson.optString("arm"))) return true;
+        return System.currentTimeMillis() < motionBusyUntil;
+    }
+
     /** Disattiva e colora in grigio i comandi non eseguibili; tutti spenti mentre un comando è in corso. */
     private void updateTelButtons() {
         if (!isAdded()) return;
         Set<String> allowed = telescopeBusy ? new HashSet<>() : allowedTelActions(lastTelescopeJson);
+        if (motionBusy()) allowed.remove("azRelative");
         android.content.res.ColorStateList grey = android.content.res.ColorStateList.valueOf(
                 getResources().getColor(R.color.vespera_steel, null));
         android.content.res.ColorStateList greyText = android.content.res.ColorStateList.valueOf(0xFFDDE3E8);
@@ -1374,7 +1381,12 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
 
     private android.widget.EditText editAzStep;
     private TextView textCable;
-    private Button btnCableUnwind;
+    private android.widget.RadioButton radioModeAbs;
+    /** Fino a quando considerare il telescopio in movimento (posizione appena cambiata o comando inviato). */
+    private long motionBusyUntil;
+    private double prevAz = Double.NaN;
+    private double prevAlt = Double.NaN;
+    private boolean cableBusy;
     private android.widget.CheckBox checkCableAuto;
     private double cableTurnsDeg;
     private TextView textMotorPos;
@@ -1386,7 +1398,7 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         if (cable == null) {
             textCable.setText("Cavo: conteggio non disponibile (aggiorna Vespera Helper ≥ 0.8.47).");
             if (textMotorPos != null) textMotorPos.setText("Posizione: AZ —  ·  ALT —");
-            btnCableUnwind.setEnabled(false);
+            cableBusy = false;
             return;
         }
         if (textMotorPos != null) {
@@ -1416,7 +1428,15 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         if (!extra.isEmpty()) line.append("\n").append(extra);
         textCable.setText(line);
         checkCableAuto.setChecked(cable.optBoolean("auto", true));
-        btnCableUnwind.setEnabled(!cable.optBoolean("busy", false));
+        cableBusy = cable.optBoolean("busy", false);
+        double az = cable.optDouble("az", Double.NaN);
+        double alt = cable.optDouble("alt", Double.NaN);
+        if (!Double.isNaN(prevAz) && !Double.isNaN(az)
+                && (Math.abs(az - prevAz) > 0.05 || Math.abs(alt - prevAlt) > 0.05)) {
+            motionBusyUntil = System.currentTimeMillis() + 7_000L;
+        }
+        prevAz = az;
+        prevAlt = alt;
     }
 
     /** Stop immediato di AZ e ALT: nessuna conferma, funziona anche con un comando in corso. */
@@ -1440,30 +1460,6 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         }));
     }
 
-    private void confirmCableUnwind() {
-        if (!isAdded()) return;
-        if (Math.abs(cableTurnsDeg) < 1.0) {
-            new androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                    .setTitle("Srotola cavo")
-                    .setMessage("Il cavo risulta già dritto (meno di 1°).")
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show();
-            return;
-        }
-        new androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                .setTitle("Conferma: Srotola ora")
-                .setMessage(String.format(Locale.ITALY,
-                        "Il cavo risulta girato di %+.0f° (%+.2f giri).\n"
-                                + "Ruoto solo l'azimut di %+.0f° a passi di 90°.\n\n"
-                                + "Il telescopio si muove davvero: controlla che nulla ostacoli la rotazione.\n"
-                                + "Puoi fermarlo con «Stop movimento».",
-                        cableTurnsDeg, cableTurnsDeg / 360.0, -cableTurnsDeg))
-                .setIcon(android.R.drawable.ic_dialog_alert)
-                .setNegativeButton("Annulla", null)
-                .setPositiveButton("Srotola", (d, w) -> sendCableLine("cmd|cable|unwind"))
-                .show();
-    }
-
     private double cableAz = Double.NaN;
 
     private void confirmCableZero() {
@@ -1480,14 +1476,15 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
                 .show();
     }
 
-    /** Muove AZ o ALT: {@code kind} "-"/"+" relativo, "abs" assoluto (cmd|telescope|motor). */
+    /** Muove AZ o ALT: {@code kind} "rel" (± gradi scritti) o "abs" (posizione), cmd|telescope|motor. */
     private void confirmMotorMove(String kind) {
         if (!isAdded()) return;
         String axis = radioAxisAlt != null && radioAxisAlt.isChecked() ? "ALT" : "AZ";
         String name = "AZ".equals(axis) ? "azimut" : "elevazione";
         double deg;
         try {
-            deg = Double.parseDouble(editAzStep.getText().toString().trim().replace(',', '.'));
+            deg = Double.parseDouble(editAzStep.getText().toString().trim()
+                    .replace(',', '.').replace("+", "").replace('−', '-'));
         } catch (NumberFormatException e) {
             deg = Double.NaN;
         }
@@ -1498,16 +1495,15 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
             double lo = "AZ".equals(axis) ? 0.0 : -90.0;
             double hi = "AZ".equals(axis) ? 360.0 : 90.0;
             if (Double.isNaN(deg) || deg < lo || deg > hi) {
-                invalid = String.format(Locale.ITALY, "Per %s usa da %.0f° a %.0f°.", axis, lo, hi);
+                invalid = String.format(Locale.ITALY, "Assoluto: per %s usa da %.0f° a %.0f°.", axis, lo, hi);
             }
             what = String.format(Locale.ITALY, "Porta l'%s (%s) a %.1f°.", name, axis, deg);
             line = String.format(Locale.US, "motor|%s|abs|%.2f", axis, deg);
         } else {
-            deg = Math.abs(deg) * ("-".equals(kind) ? -1 : 1);
             if (Double.isNaN(deg) || deg == 0 || Math.abs(deg) > 180) {
-                invalid = "Gradi non validi: da 0,1° a 180°.";
+                invalid = "Relativo: da ±0,1° a ±180° (es. +5 o −10).";
             }
-            what = String.format(Locale.ITALY, "Muovi l'%s (%s) di %+.1f°.", name, axis, deg);
+            what = String.format(Locale.ITALY, "Muovi l'%s (%s) di %+.1f° dalla posizione attuale.", name, axis, deg);
             line = String.format(Locale.US, "motor|%s|rel|%.2f", axis, deg);
         }
         if (invalid != null) {
@@ -1518,10 +1514,10 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
                     .show();
             return;
         }
-        if (telescopeBusy) {
+        if (telescopeBusy || motionBusy()) {
             new androidx.appcompat.app.AlertDialog.Builder(requireContext())
                     .setTitle("Comando telescopio")
-                    .setMessage("C'è già un comando telescopio in corso: aspetta che finisca e riprova.")
+                    .setMessage("Il telescopio è in movimento o c'è un comando in corso: aspetta che finisca.")
                     .setPositiveButton(android.R.string.ok, null)
                     .show();
             return;
@@ -1536,7 +1532,10 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
                         + warn + "\n\nPuoi fermarlo con «Stop movimento».\n\nInviare il comando al telescopio?")
                 .setIcon(android.R.drawable.ic_dialog_alert)
                 .setNegativeButton("Annulla", null)
-                .setPositiveButton("Muovi", (d, w) -> sendTelescope(line, "Movimento"))
+                .setPositiveButton("Muovi", (d, w) -> {
+                    motionBusyUntil = System.currentTimeMillis() + 10_000L;
+                    sendTelescope(line, "Movimento");
+                })
                 .show();
     }
 

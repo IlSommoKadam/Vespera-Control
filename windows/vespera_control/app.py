@@ -815,23 +815,33 @@ class App(tk.Tk):
         self.motor_axis = tk.StringVar(value="AZ")
         ttk.Radiobutton(az_row, text="Azimut (AZ)", value="AZ", variable=self.motor_axis).pack(side="left")
         ttk.Radiobutton(az_row, text="Elevazione (ALT)", value="ALT",
-                        variable=self.motor_axis).pack(side="left", padx=(6, 12))
-        self.az_step = tk.StringVar(value="5")
-        ttk.Spinbox(az_row, from_=-360, to=360, increment=0.5, width=7,
+                        variable=self.motor_axis).pack(side="left", padx=(6, 0))
+        mode_row = ttk.Frame(card, style="Card.TFrame")
+        mode_row.pack(fill="x", pady=(4, 0))
+        ttk.Label(mode_row, text="Modo:", style="Card.TLabel").pack(side="left", padx=(0, 4))
+        self.motor_mode = tk.StringVar(value="rel")
+        ttk.Radiobutton(mode_row, text="Relativo (± gradi dalla posizione attuale)", value="rel",
+                        variable=self.motor_mode).pack(side="left")
+        ttk.Radiobutton(mode_row, text="Assoluto (vai alla posizione)", value="abs",
+                        variable=self.motor_mode).pack(side="left", padx=(6, 0))
+        go_row = ttk.Frame(card, style="Card.TFrame")
+        go_row.pack(fill="x", pady=(4, 0))
+        ttk.Label(go_row, text="Gradi:", style="Card.TLabel").pack(side="left", padx=(0, 4))
+        self.az_step = tk.StringVar(value="+5")
+        ttk.Spinbox(go_row, from_=-360, to=360, increment=0.5, width=8,
                     textvariable=self.az_step).pack(side="left")
-        ttk.Label(az_row, text="°", style="Card.TLabel").pack(side="left", padx=(2, 8))
-        self._tel_btns["azMinus"] = ttk.Button(az_row, text="− gradi", command=lambda: self.motor_move("-"))
-        self._tel_btns["azMinus"].pack(side="left", padx=(0, 6))
-        self._tel_btns["azPlus"] = ttk.Button(az_row, text="+ gradi", command=lambda: self.motor_move("+"))
-        self._tel_btns["azPlus"].pack(side="left", padx=(0, 6))
-        self._tel_btns["azGoto"] = ttk.Button(az_row, text="Vai a", command=lambda: self.motor_move("abs"))
-        self._tel_btns["azGoto"].pack(side="left")
-        # Sempre attivo: ferma il movimento in corso (anche lo srotolamento automatico).
-        ttk.Button(az_row, text="■ Stop", style="Danger.TButton",
+        ttk.Label(go_row, text="°", style="Card.TLabel").pack(side="left", padx=(2, 8))
+        # Attivo solo a telescopio fermo (vedi _update_tel_buttons).
+        self._tel_btns["azGo"] = ttk.Button(go_row, text="Vai", style="Primary.TButton",
+                                            command=self.motor_move)
+        self._tel_btns["azGo"].pack(side="left")
+        # Sempre attivo: ferma il movimento in corso (anche il riposizionamento automatico).
+        ttk.Button(go_row, text="■ Stop", style="Danger.TButton",
                    command=self.az_stop).pack(side="left", padx=(6, 0))
         ttk.Label(card, style="Card.TLabel", wraplength=900,
-                  text="«− / + gradi» muovono l'asse di quei gradi (max 180°); «Vai a» lo porta alla "
-                       "posizione indicata (AZ 0…360°, ALT −90…90°; −90° = braccio chiuso).").pack(anchor="w")
+                  text="Relativo: +5 / −10 muove l'asse di quei gradi dalla posizione attuale (max ±180°). "
+                       "Assoluto: porta l'asse alla posizione (AZ 0…360°, ALT −90…90°; −90° = braccio chiuso). "
+                       "«Vai» è attivo solo a telescopio fermo.").pack(anchor="w")
         cable_row = ttk.Frame(card, style="Card.TFrame")
         cable_row.pack(fill="x", pady=(8, 0))
         self.cable_text = tk.StringVar(value="Cavo: —")
@@ -839,8 +849,6 @@ class App(tk.Tk):
                   wraplength=900).pack(anchor="w")
         cable_btns = ttk.Frame(card, style="Card.TFrame")
         cable_btns.pack(fill="x", pady=(4, 0))
-        self._cable_unwind_btn = ttk.Button(cable_btns, text="Srotola ora", command=self.cable_unwind)
-        self._cable_unwind_btn.pack(side="left", padx=(0, 6))
         ttk.Button(cable_btns, text="Set posizione iniziale (cavo dritto)", command=self.cable_zero).pack(side="left", padx=(0, 12))
         self.cable_auto = tk.BooleanVar(value=True)
         ttk.Checkbutton(cable_btns, text="Riposiziona da solo al Set (fine osservazione e di giorno)",
@@ -2061,33 +2069,33 @@ class App(tk.Tk):
                                          separators=(",", ":"))
         self.cmd(line, wait=150 if action in {"init", "resume"} else 45)
 
-    def motor_move(self, kind: str) -> None:
-        """Muove AZ o ALT: kind «-»/«+» relativo, «abs» assoluto (cmd|telescope|motor)."""
+    def motor_move(self) -> None:
+        """Muove AZ o ALT nel modo scelto: relativo (± gradi) o assoluto (cmd|telescope|motor)."""
         axis = self.motor_axis.get()
+        absolute = self.motor_mode.get() == "abs"
         try:
-            deg = float(self.az_step.get().replace(",", "."))
+            deg = float(self.az_step.get().replace(",", ".").replace(" ", "").replace("−", "-"))
         except ValueError:
             messagebox.showerror("Movimento", "Gradi non validi.", parent=self)
             return
         name = "azimut" if axis == "AZ" else "elevazione"
-        if kind == "abs":
+        if absolute:
             lo, hi = (0.0, 360.0) if axis == "AZ" else (-90.0, 90.0)
             if not lo <= deg <= hi:
-                messagebox.showerror("Movimento", f"Per {axis} usa da {lo:g}° a {hi:g}°.", parent=self)
+                messagebox.showerror("Movimento", f"Assoluto: per {axis} usa da {lo:g}° a {hi:g}°.", parent=self)
                 return
-            what = f"Porta l'{name} ({axis}) a {deg:.1f}°."
+            what = f"Porta l'{name} ({axis}) alla posizione {deg:.1f}°."
             line = f"cmd|telescope|motor|{axis}|abs|{deg:.2f}"
         else:
-            deg = abs(deg) * (-1 if kind == "-" else 1)
             if not 0 < abs(deg) <= 180:
-                messagebox.showerror("Movimento", "Gradi non validi: da 0,1° a 180°.", parent=self)
+                messagebox.showerror("Movimento", "Relativo: da ±0,1° a ±180° (es. +5 o −10).", parent=self)
                 return
-            what = f"Muovi l'{name} ({axis}) di {deg:+.1f}°."
+            what = f"Muovi l'{name} ({axis}) di {deg:+.1f}° dalla posizione attuale."
             line = f"cmd|telescope|motor|{axis}|rel|{deg:.2f}"
-        if self._busy:
+        if self._busy or self._motion_busy():
             messagebox.showwarning(
                 "Comando telescopio",
-                "C'è già un'operazione in corso: aspetta che finisca e riprova.",
+                "Il telescopio è in movimento o c'è un'operazione in corso: aspetta che finisca.",
                 parent=self,
             )
             return
@@ -2105,7 +2113,18 @@ class App(tk.Tk):
         ):
             self.set_status("Movimento: annullato.", "info")
             return
+        self._moving_until = time.time() + 10
+        self._update_tel_buttons((self.state or {}).get("telescope") or {})
         self.cmd(line, wait=45)
+
+    def _motion_busy(self) -> bool:
+        """Movimento in corso: rotazione dell'Helper, braccio in movimento o posizione appena cambiata."""
+        state = self.state or {}
+        cable = state.get("cable") or {}
+        tel = state.get("telescope") or {}
+        if cable.get("busy") or tel.get("arm") == "MOVING":
+            return True
+        return time.time() < getattr(self, "_moving_until", 0.0)
 
     def az_stop(self) -> None:
         """Stop immediato di AZ e ALT: fuori dalla coda dei comandi, senza conferma."""
@@ -2121,23 +2140,6 @@ class App(tk.Tk):
 
         self.set_status("Stop AZ…", "info")
         threading.Thread(target=work, daemon=True).start()
-
-    def cable_unwind(self) -> None:
-        cable = (self.state or {}).get("cable") or {}
-        deg = float(cable.get("turnsDeg") or 0.0)
-        if abs(deg) < 1:
-            messagebox.showinfo("Srotola cavo", "Il cavo risulta già dritto (meno di 1°).", parent=self)
-            return
-        if not messagebox.askokcancel(
-            "Conferma: Srotola ora",
-            f"Il cavo risulta girato di {deg:+.0f}° ({deg / 360:+.2f} giri).\n"
-            f"Ruoto solo l'azimut di {-deg:+.0f}° a passi di 90°.\n\n"
-            "Il telescopio si muove davvero: controlla che nulla ostacoli la rotazione.\n"
-            "Puoi fermarlo con «Stop AZ».",
-            icon="warning", default="cancel", parent=self,
-        ):
-            return
-        self.cmd("cmd|cable|unwind", wait=45)
 
     def cable_zero(self) -> None:
         az = ((self.state or {}).get("cable") or {}).get("az")
@@ -2161,7 +2163,6 @@ class App(tk.Tk):
         if not cable:
             self.cable_text.set("Cavo: conteggio non disponibile (aggiorna Vespera Helper ≥ 0.8.47).")
             self.motor_pos_text.set("Posizione: AZ —  ·  ALT —")
-            self._cable_unwind_btn.state(["disabled"])
             return
         az, alt = cable.get("az"), cable.get("alt")
         self.motor_pos_text.set(
@@ -2181,16 +2182,25 @@ class App(tk.Tk):
             line += "  ·  " + extra
         self.cable_text.set(line)
         self.cable_auto.set(bool(cable.get("auto", True)))
-        self._cable_unwind_btn.state(["disabled"] if cable.get("busy") else ["!disabled"])
 
     def _update_tel_buttons(self, tel: dict) -> None:
         """Disabilita (in grigio) i comandi che il telescopio ora non può eseguire."""
         if not hasattr(self, "_tel_btns"):
             return
         allowed = tel_actions_allowed(tel)
+        # Posizione cambiata dall'ultimo stato = il telescopio si sta muovendo (goto, park…).
+        cable = (self.state or {}).get("cable") or {}
+        pos = (cable.get("az"), cable.get("alt"))
+        prev = getattr(self, "_prev_motor_pos", None)
+        if prev is not None and None not in pos and None not in prev and (
+                abs(pos[0] - prev[0]) > 0.05 or abs(pos[1] - prev[1]) > 0.05):
+            self._moving_until = time.time() + 7
+        self._prev_motor_pos = pos
+        moving = self._motion_busy()
         for key, btn in self._tel_btns.items():
             action = "azRelative" if key.startswith("az") else key
-            btn.state(["!disabled"] if allowed.get(action) else ["disabled"])
+            on = allowed.get(action) and not (moving and key.startswith("az"))
+            btn.state(["!disabled"] if on else ["disabled"])
 
     def _tel_result(self, action: str, ok: bool, ack: str) -> None:
         label = TEL_ACTIONS.get(action, (action,))[0]

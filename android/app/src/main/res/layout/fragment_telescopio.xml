@@ -121,6 +121,27 @@
                 android:text="Elevazione (ALT)" />
         </RadioGroup>
 
+        <RadioGroup
+            android:id="@+id/groupMotorMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/radioModeRel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="Relativo (± gradi)" />
+
+            <RadioButton
+                android:id="@+id/radioModeAbs"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:text="Assoluto (posizione)" />
+        </RadioGroup>
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -129,13 +150,13 @@
 
             <EditText
                 android:id="@+id/editAzStep"
-                android:layout_width="80dp"
+                android:layout_width="96dp"
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:hint="°"
                 android:importantForAutofill="no"
                 android:inputType="numberDecimal|numberSigned"
-                android:text="5" />
+                android:text="+5" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -144,36 +165,18 @@
                 android:text="°" />
 
             <Button
-                android:id="@+id/btnAzMinus"
+                android:id="@+id/btnMotorGo"
                 style="@style/Widget.Vespera.Button.Primary"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="− gradi" />
-
-            <Button
-                android:id="@+id/btnAzPlus"
-                style="@style/Widget.Vespera.Button.Primary"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:layout_weight="1"
-                android:text="+ gradi" />
-
-            <Button
-                android:id="@+id/btnMotorGoto"
-                style="@style/Widget.Vespera.Button.Primary"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:layout_weight="1"
-                android:text="Vai a" />
+                android:text="Vai" />
         </LinearLayout>
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="«− / + gradi» muovono l'asse di quei gradi (max 180°); «Vai a» lo porta alla posizione indicata (AZ 0…360°, ALT −90…90°; −90° = braccio chiuso)."
+            android:text="Relativo: +5 / −10 muove l'asse di quei gradi dalla posizione attuale (max ±180°). Assoluto: porta l'asse alla posizione (AZ 0…360°, ALT −90…90°; −90° = braccio chiuso). «Vai» è attivo solo a telescopio fermo."
             android:textColor="@color/vespera_muted"
             android:textSize="12sp" />
 
@@ -192,28 +195,12 @@
             android:text="Cavo: —"
             android:textColor="@color/vespera_title" />
 
-        <LinearLayout
+        <Button
+            android:id="@+id/btnCableZero"
+            style="@style/Widget.Vespera.Button.Primary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/btnCableUnwind"
-                style="@style/Widget.Vespera.Button.Primary"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Srotola ora" />
-
-            <Button
-                android:id="@+id/btnCableZero"
-                style="@style/Widget.Vespera.Button.Primary"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:text="Set posizione iniziale" />
-        </LinearLayout>
+            android:text="Set posizione iniziale (cavo dritto)" />
 
         <CheckBox
             android:id="@+id/checkCableAuto"
