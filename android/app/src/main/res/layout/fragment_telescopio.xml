@@ -87,9 +87,39 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Ruota solo azimut (test cavo)"
-            android:textColor="@color/vespera_muted" />
+            android:layout_marginTop="12dp"
+            android:text="Movimento manuale"
+            android:textColor="@color/vespera_title"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/textMotorPos"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:text="Posizione: AZ —  ·  ALT —"
+            android:textColor="@color/vespera_title" />
+
+        <RadioGroup
+            android:id="@+id/groupMotorAxis"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/radioAxisAz"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="Azimut (AZ)" />
+
+            <RadioButton
+                android:id="@+id/radioAxisAlt"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:text="Elevazione (ALT)" />
+        </RadioGroup>
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -99,12 +129,12 @@
 
             <EditText
                 android:id="@+id/editAzStep"
-                android:layout_width="72dp"
+                android:layout_width="80dp"
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:hint="°"
                 android:importantForAutofill="no"
-                android:inputType="numberDecimal"
+                android:inputType="numberDecimal|numberSigned"
                 android:text="5" />
 
             <TextView
@@ -119,24 +149,40 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="⟲ AZ −" />
+                android:text="− gradi" />
 
             <Button
                 android:id="@+id/btnAzPlus"
                 style="@style/Widget.Vespera.Button.Primary"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
+                android:layout_marginStart="6dp"
                 android:layout_weight="1"
-                android:text="AZ + ⟳" />
+                android:text="+ gradi" />
+
+            <Button
+                android:id="@+id/btnMotorGoto"
+                style="@style/Widget.Vespera.Button.Primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:text="Vai a" />
         </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="«− / + gradi» muovono l'asse di quei gradi (max 180°); «Vai a» lo porta alla posizione indicata (AZ 0…360°, ALT −90…90°; −90° = braccio chiuso)."
+            android:textColor="@color/vespera_muted"
+            android:textSize="12sp" />
 
         <Button
             android:id="@+id/btnAzStop"
             style="@style/Widget.Vespera.Button.Danger"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="■ Stop AZ" />
+            android:text="■ Stop movimento" />
 
         <TextView
             android:id="@+id/textCable"

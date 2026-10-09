@@ -32,6 +32,7 @@ cmd|sync|now|resume|pause
 cmd|telescope|park|stop|resume|init|shutdown|observe|{json}|observeResume|{storeId}
 cmd|telescope|azRelative|<gradi>
 cmd|telescope|azStop
+cmd|telescope|motor|<AZ|ALT>|<rel|abs>|<gradi>
 cmd|cable|unwind|zero|auto|on|off
 cmd|plan|load|{json}
 cmd|plan|cancel
@@ -45,10 +46,14 @@ cmd|plan|cancel
 
 `cmd|telescope|azStop` → `POST /v1/motors/stop {"AZ":true}` (hard stop delle operazioni che usano l'AZ) e interrompe anche lo srotolamento a passi.
 
+### Movimento manuale AZ/ALT (Helper ≥ 0.8.48)
+
+`cmd|telescope|motor|<AZ|ALT>|<rel|abs>|<gradi>`: `rel` muove l'asse di ±0,1…180° (`POST /v1/motors/goRelative`), `abs` lo porta a una posizione (`POST /v1/motors/goAbsolute`; AZ 0…360°, ALT −90…90°, −90° = braccio chiuso). Body `{"<asse>":<gradi>}`; se NOT_CALIBRATED l'Helper fa prima `seekStop` di quell'asse (per ALT chiude il braccio). Asincrono: ack `OK|telescope|motor|0|avviato …`, esito in `cable.lastResult`. `cmd|telescope|azStop` (o `motorStop`) ferma AZ e ALT (`/v1/motors/stop {"AZ":true,"ALT":true}`). Il firmware non controlla il Sole: alzare il braccio di giorno è a rischio dell'utente. Posizione corrente in `cable.az` / `cable.alt`.
+
 ### Giri del cavo (Helper ≥ 0.8.47)
 
 L'Helper somma le variazioni dell'AZ (`motors.AZ.position`, ognuna riportata in −180…+180°; campioni ogni 3 s in movimento, 15 s da fermo). Il park (`seekStop` di ALT/AZ/MAP) viene contato come gli altri movimenti. Di giorno, braccio chiuso e telescopio fermo da 5 min, con almeno mezzo giro srotola da solo i giri interi (`−360·round(giri)`) a passi di 90°, una volta al giorno. `cmd|cable|unwind` srotola tutto il conteggio, `cmd|cable|zero` lo azzera (cavo raddrizzato a mano), `cmd|cable|auto|on|off` attiva lo srotolamento automatico.
-Stato in `remote.state.json` → `cable`: `{turnsDeg, turns, auto, busy, activity, lastResult, lastSampleAt, az}`.
+Stato in `remote.state.json` → `cable`: `{turnsDeg, turns, auto, busy, activity, lastResult, lastSampleAt, az, alt}`.
 
 ### Piano della notte (Helper â‰¥ 0.8.23)
 

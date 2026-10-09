@@ -121,6 +121,7 @@ TEL_ACTIONS = {
     "resume": ("Riprendi", "Riprende l'osservazione dell'ultimo oggetto (fa l'Init se serve).", False),
     "shutdown": ("Shutdown", "Spegne il telescopio. Per riaccenderlo serve il pulsante fisico.", True),
     "azRelative": ("Ruota AZ", "Ruota solo il motore azimutale del Vespera (test srotolamento cavo).", True),
+    "motor": ("Movimento", "Muove a mano l'azimut o l'elevazione del Vespera.", True),
 }
 
 
@@ -181,12 +182,16 @@ def tel_error_text(ack: str) -> str:
         hint = "L'inizializzazione non è ancora finita: riprova tra poco."
     elif "azrelative|unknown" in low or "unknown|azrelative" in low:
         hint = "Vespera Helper sul Pi troppo vecchio: aggiornalo (≥ 0.8.44) per ruotare l'azimut."
+    elif "unknown|motor" in low:
+        hint = "Vespera Helper sul Pi troppo vecchio: aggiornalo (≥ 0.8.48) per il movimento manuale."
+    elif "angle_out_of_range" in low:
+        hint = "Posizione fuori dai limiti: AZ 0…360°, ALT −90…90°."
     elif "angle_too_large" in low or "invalid_angle" in low:
-        hint = "Angolo non valido: usa da 0,1° a 90° per comando."
+        hint = "Angolo non valido: da 0,1° a 180° per comando."
     elif "not_calibrated" in low:
-        hint = "Il motore azimutale non è calibrato: fai prima l'Init."
-    elif "azrelative" in low and "busy" in low:
-        hint = "C'è già una rotazione dell'azimut in corso: aspetta o premi «Stop AZ»."
+        hint = "Il motore non è calibrato: fai prima l'Init."
+    elif ("azrelative" in low or "motor" in low) and "busy" in low:
+        hint = "C'è già un movimento in corso: aspetta o premi «Stop»."
     elif "nessun ack" in low or "helper avviato" in low:
         hint = "Nessuna risposta dall'Helper sul Pi: è avviato? (tab Connessioni → Aggiorna stato)."
     else:
@@ -801,20 +806,32 @@ class App(tk.Tk):
             )
             btn.pack(side="left", padx=(0, 6))
             self._tel_btns[action] = btn
+        ttk.Label(card, text="Movimento manuale", style="Section.TLabel").pack(anchor="w", pady=(12, 2))
+        self.motor_pos_text = tk.StringVar(value="Posizione: AZ —  ·  ALT —")
+        ttk.Label(card, textvariable=self.motor_pos_text, style="Card.TLabel").pack(anchor="w")
         az_row = ttk.Frame(card, style="Card.TFrame")
-        az_row.pack(fill="x", pady=(10, 0))
-        ttk.Label(az_row, text="Ruota solo azimut (test cavo):", style="Card.TLabel").pack(side="left", padx=(0, 6))
+        az_row.pack(fill="x", pady=(4, 0))
+        ttk.Label(az_row, text="Asse:", style="Card.TLabel").pack(side="left", padx=(0, 4))
+        self.motor_axis = tk.StringVar(value="AZ")
+        ttk.Radiobutton(az_row, text="Azimut (AZ)", value="AZ", variable=self.motor_axis).pack(side="left")
+        ttk.Radiobutton(az_row, text="Elevazione (ALT)", value="ALT",
+                        variable=self.motor_axis).pack(side="left", padx=(6, 12))
         self.az_step = tk.StringVar(value="5")
-        ttk.Spinbox(az_row, from_=0.5, to=90, increment=0.5, width=6,
+        ttk.Spinbox(az_row, from_=-360, to=360, increment=0.5, width=7,
                     textvariable=self.az_step).pack(side="left")
         ttk.Label(az_row, text="°", style="Card.TLabel").pack(side="left", padx=(2, 8))
-        self._tel_btns["azMinus"] = ttk.Button(az_row, text="⟲ AZ −", command=lambda: self.az_rotate(-1))
+        self._tel_btns["azMinus"] = ttk.Button(az_row, text="− gradi", command=lambda: self.motor_move("-"))
         self._tel_btns["azMinus"].pack(side="left", padx=(0, 6))
-        self._tel_btns["azPlus"] = ttk.Button(az_row, text="AZ + ⟳", command=lambda: self.az_rotate(1))
-        self._tel_btns["azPlus"].pack(side="left")
-        # Sempre attivo: ferma la rotazione in corso (anche lo srotolamento automatico).
-        ttk.Button(az_row, text="■ Stop AZ", style="Danger.TButton",
+        self._tel_btns["azPlus"] = ttk.Button(az_row, text="+ gradi", command=lambda: self.motor_move("+"))
+        self._tel_btns["azPlus"].pack(side="left", padx=(0, 6))
+        self._tel_btns["azGoto"] = ttk.Button(az_row, text="Vai a", command=lambda: self.motor_move("abs"))
+        self._tel_btns["azGoto"].pack(side="left")
+        # Sempre attivo: ferma il movimento in corso (anche lo srotolamento automatico).
+        ttk.Button(az_row, text="■ Stop", style="Danger.TButton",
                    command=self.az_stop).pack(side="left", padx=(6, 0))
+        ttk.Label(card, style="Card.TLabel", wraplength=900,
+                  text="«− / + gradi» muovono l'asse di quei gradi (max 180°); «Vai a» lo porta alla "
+                       "posizione indicata (AZ 0…360°, ALT −90…90°; −90° = braccio chiuso).").pack(anchor="w")
         cable_row = ttk.Frame(card, style="Card.TFrame")
         cable_row.pack(fill="x", pady=(8, 0))
         self.cable_text = tk.StringVar(value="Cavo: —")
@@ -2044,15 +2061,29 @@ class App(tk.Tk):
                                          separators=(",", ":"))
         self.cmd(line, wait=150 if action in {"init", "resume"} else 45)
 
-    def az_rotate(self, sign: int) -> None:
-        """Ruota solo il motore azimutale di ±N gradi (cmd|telescope|azRelative)."""
+    def motor_move(self, kind: str) -> None:
+        """Muove AZ o ALT: kind «-»/«+» relativo, «abs» assoluto (cmd|telescope|motor)."""
+        axis = self.motor_axis.get()
         try:
             deg = float(self.az_step.get().replace(",", "."))
         except ValueError:
-            deg = 0.0
-        if not 0 < deg <= 90:
-            messagebox.showerror("Ruota AZ", "Angolo non valido: usa da 0,1° a 90°.", parent=self)
+            messagebox.showerror("Movimento", "Gradi non validi.", parent=self)
             return
+        name = "azimut" if axis == "AZ" else "elevazione"
+        if kind == "abs":
+            lo, hi = (0.0, 360.0) if axis == "AZ" else (-90.0, 90.0)
+            if not lo <= deg <= hi:
+                messagebox.showerror("Movimento", f"Per {axis} usa da {lo:g}° a {hi:g}°.", parent=self)
+                return
+            what = f"Porta l'{name} ({axis}) a {deg:.1f}°."
+            line = f"cmd|telescope|motor|{axis}|abs|{deg:.2f}"
+        else:
+            deg = abs(deg) * (-1 if kind == "-" else 1)
+            if not 0 < abs(deg) <= 180:
+                messagebox.showerror("Movimento", "Gradi non validi: da 0,1° a 180°.", parent=self)
+                return
+            what = f"Muovi l'{name} ({axis}) di {deg:+.1f}°."
+            line = f"cmd|telescope|motor|{axis}|rel|{deg:.2f}"
         if self._busy:
             messagebox.showwarning(
                 "Comando telescopio",
@@ -2060,23 +2091,24 @@ class App(tk.Tk):
                 parent=self,
             )
             return
-        deg *= 1 if sign >= 0 else -1
+        warn = ""
+        if axis == "ALT":
+            warn = ("\n\nATTENZIONE: alzare il braccio di giorno può puntare il telescopio verso il Sole "
+                    "e danneggiare il sensore. Il firmware non fa controlli in questo comando.")
         if not messagebox.askokcancel(
-            "Conferma: Ruota AZ",
-            f"Ruota solo il motore azimutale di {deg:+.1f}°.\n"
-            "Annota il verso reale (orario/antiorario visto dall'alto) per lo srotolamento automatico.\n\n"
-            "Il telescopio si muove davvero: controlla che nulla ostacoli la rotazione.\n\n"
-            "Inviare il comando al telescopio?",
+            "Conferma: Movimento",
+            what + "\nIl telescopio si muove davvero: controlla che nulla ostacoli il movimento."
+            + warn + "\n\nPuoi fermarlo con «Stop».\n\nInviare il comando al telescopio?",
             icon="warning",
             default="cancel",
             parent=self,
         ):
-            self.set_status("Ruota AZ: annullato.", "info")
+            self.set_status("Movimento: annullato.", "info")
             return
-        self.cmd(f"cmd|telescope|azRelative|{deg:.2f}", wait=45)
+        self.cmd(line, wait=45)
 
     def az_stop(self) -> None:
-        """Stop immediato del motore AZ: fuori dalla coda dei comandi, senza conferma."""
+        """Stop immediato di AZ e ALT: fuori dalla coda dei comandi, senza conferma."""
         def work() -> None:
             try:
                 bridge = self.ensure_bridge()
@@ -2125,10 +2157,16 @@ class App(tk.Tk):
             return
         if not cable:
             self.cable_text.set("Cavo: conteggio non disponibile (aggiorna Vespera Helper ≥ 0.8.47).")
+            self.motor_pos_text.set("Posizione: AZ —  ·  ALT —")
             self._cable_unwind_btn.state(["disabled"])
             return
+        az, alt = cable.get("az"), cable.get("alt")
+        self.motor_pos_text.set(
+            "Posizione: AZ " + (f"{float(az):.1f}°" if az is not None else "—")
+            + "  ·  ALT " + (f"{float(alt):.1f}°" if alt is not None else "—")
+            + ("  (braccio chiuso)" if alt is not None and float(alt) <= -80 else ""))
         deg = float(cable.get("turnsDeg") or 0.0)
-        line = f"Cavo: {deg / 360:+.2f} giri ({deg:+.0f}°)"
+        line = f"Cavo: {deg:+.1f}° ({deg / 360:+.2f} giri)"
         line += "  ·  auto " + ("sì" if cable.get("auto") else "no")
         extra = cable.get("activity") or cable.get("lastResult") or ""
         if extra:
