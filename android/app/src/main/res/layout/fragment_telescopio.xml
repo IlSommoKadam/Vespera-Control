@@ -212,7 +212,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:layout_weight="1"
-                android:text="Cavo dritto: azzera" />
+                android:text="Set posizione iniziale" />
         </LinearLayout>
 
         <CheckBox
@@ -220,7 +220,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:checked="true"
-            android:text="Srotola da solo di giorno (a braccio chiuso)"
+            android:text="Riposiziona da solo al Set (fine osservazione e di giorno)"
             android:textColor="@color/vespera_muted" />
 
         <TextView

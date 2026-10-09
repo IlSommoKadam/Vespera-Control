@@ -841,9 +841,9 @@ class App(tk.Tk):
         cable_btns.pack(fill="x", pady=(4, 0))
         self._cable_unwind_btn = ttk.Button(cable_btns, text="Srotola ora", command=self.cable_unwind)
         self._cable_unwind_btn.pack(side="left", padx=(0, 6))
-        ttk.Button(cable_btns, text="Cavo dritto: azzera", command=self.cable_zero).pack(side="left", padx=(0, 12))
+        ttk.Button(cable_btns, text="Set posizione iniziale (cavo dritto)", command=self.cable_zero).pack(side="left", padx=(0, 12))
         self.cable_auto = tk.BooleanVar(value=True)
-        ttk.Checkbutton(cable_btns, text="Srotola da solo di giorno (a braccio chiuso)",
+        ttk.Checkbutton(cable_btns, text="Riposiziona da solo al Set (fine osservazione e di giorno)",
                         variable=self.cable_auto, command=self.cable_set_auto).pack(side="left")
         self._update_tel_buttons({})
         ttk.Label(card, text="Stato dettagliato (Helper)", style="Section.TLabel").pack(anchor="w", pady=(12, 4))
@@ -2140,14 +2140,17 @@ class App(tk.Tk):
         self.cmd("cmd|cable|unwind", wait=45)
 
     def cable_zero(self) -> None:
+        az = ((self.state or {}).get("cable") or {}).get("az")
+        here = f"AZ {float(az):.1f}°" if az is not None else "la posizione attuale"
         if not messagebox.askyesno(
-            "Cavo dritto",
+            "Set posizione iniziale",
             "Confermi che ora il cavo di alimentazione è dritto (non attorcigliato)?\n\n"
-            "Il conteggio dei giri riparte da 0.",
+            f"{here} diventa il riferimento: il conteggio del cavo riparte da 0 e a fine "
+            "osservazione il telescopio torna qui.",
             parent=self,
         ):
             return
-        self.cmd("cmd|cable|zero", wait=30)
+        self.cmd("cmd|cable|set", wait=30)
 
     def cable_set_auto(self) -> None:
         self.cmd("cmd|cable|auto|" + ("on" if self.cable_auto.get() else "off"), wait=30)
@@ -2167,7 +2170,12 @@ class App(tk.Tk):
             + ("  (braccio chiuso)" if alt is not None and float(alt) <= -80 else ""))
         deg = float(cable.get("turnsDeg") or 0.0)
         line = f"Cavo: {deg:+.1f}° ({deg / 360:+.2f} giri)"
+        ref = cable.get("refAz")
+        line += "  ·  Set: " + (f"AZ {float(ref):.1f}°" if ref is not None else "non fatto")
         line += "  ·  auto " + ("sì" if cable.get("auto") else "no")
+        if cable.get("obsStartAz"):
+            line += (f"\nInizio osservazione {cable.get('obsTarget') or ''}: AZ {cable.get('obsStartAz')}"
+                     f" · ALT {cable.get('obsStartAlt') or '—'}")
         extra = cable.get("activity") or cable.get("lastResult") or ""
         if extra:
             line += "  ·  " + extra

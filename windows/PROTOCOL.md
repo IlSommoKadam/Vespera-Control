@@ -33,7 +33,7 @@ cmd|telescope|park|stop|resume|init|shutdown|observe|{json}|observeResume|{store
 cmd|telescope|azRelative|<gradi>
 cmd|telescope|azStop
 cmd|telescope|motor|<AZ|ALT>|<rel|abs>|<gradi>
-cmd|cable|unwind|zero|auto|on|off
+cmd|cable|unwind|set|zero|auto|on|off
 cmd|plan|load|{json}
 cmd|plan|cancel
 ```
@@ -53,7 +53,11 @@ cmd|plan|cancel
 ### Giri del cavo (Helper ≥ 0.8.47)
 
 L'Helper somma le variazioni dell'AZ (`motors.AZ.position`, ognuna riportata in −180…+180°; campioni ogni 3 s in movimento, 15 s da fermo). Il park (`seekStop` di ALT/AZ/MAP) viene contato come gli altri movimenti. Di giorno, braccio chiuso e telescopio fermo da 5 min, con almeno mezzo giro srotola da solo i giri interi (`−360·round(giri)`) a passi di 90°, una volta al giorno. `cmd|cable|unwind` srotola tutto il conteggio, `cmd|cable|zero` lo azzera (cavo raddrizzato a mano), `cmd|cable|auto|on|off` attiva lo srotolamento automatico.
-Stato in `remote.state.json` → `cable`: `{turnsDeg, turns, auto, busy, activity, lastResult, lastSampleAt, az, alt}`.
+Stato in `remote.state.json` → `cable`: `{turnsDeg, turns, auto, busy, activity, lastResult, lastSampleAt, az, alt, refAz, obsTarget, obsStartAz, obsStartAlt}`.
+
+### Set e riposizionamento a fine osservazione (Helper ≥ 0.8.49)
+
+`cmd|cable|set` (alias `zero`): con il cavo dritto, l'AZ attuale diventa il riferimento (`refAz`) e il conteggio riparte da 0. All'avvio di un'osservazione (OBS_STARTED/RESUMED) l'Helper salva AZ/ALT/cavo e li manda su Telegram. Alla fine (OBS_STOPPED/FINISHED), dopo 3 min e se nessun passo del piano parte entro 30 min, manda «inizio riposizionamento», ruota l'azimut di `−turnsDeg` (torna al Set) e manda lo stato finale: AZ, ALT, braccio, scarto dal Set, cavo srotolato o no. Di giorno a braccio chiuso fa lo stesso (una volta al giorno). `cmd|cable|auto|off` disattiva entrambi.
 
 ### Piano della notte (Helper â‰¥ 0.8.23)
 

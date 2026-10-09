@@ -1402,6 +1402,15 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         StringBuilder line = new StringBuilder(String.format(Locale.ITALY,
                 "Cavo: %+.1f° (%+.2f giri)  ·  auto %s",
                 cableTurnsDeg, cableTurnsDeg / 360.0, cable.optBoolean("auto", true) ? "sì" : "no"));
+        cableAz = cable.has("az") && !cable.isNull("az") ? cable.optDouble("az") : Double.NaN;
+        line.append("\nSet: ").append(cable.has("refAz") && !cable.isNull("refAz")
+                ? String.format(Locale.ITALY, "AZ %.1f°", cable.optDouble("refAz")) : "non fatto");
+        String startAz = cable.optString("obsStartAz", "");
+        if (!startAz.isEmpty()) {
+            line.append("\nInizio osservazione ").append(cable.optString("obsTarget", ""))
+                    .append(": AZ ").append(startAz)
+                    .append(" · ALT ").append(cable.optString("obsStartAlt", "—"));
+        }
         String extra = cable.optString("activity", "");
         if (extra.isEmpty()) extra = cable.optString("lastResult", "");
         if (!extra.isEmpty()) line.append("\n").append(extra);
@@ -1455,14 +1464,19 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
                 .show();
     }
 
+    private double cableAz = Double.NaN;
+
     private void confirmCableZero() {
         if (!isAdded()) return;
+        String here = Double.isNaN(cableAz) ? "La posizione attuale"
+                : String.format(Locale.ITALY, "AZ %.1f°", cableAz);
         new androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                .setTitle("Cavo dritto")
+                .setTitle("Set posizione iniziale")
                 .setMessage("Confermi che ora il cavo di alimentazione è dritto (non attorcigliato)?\n\n"
-                        + "Il conteggio dei giri riparte da 0.")
+                        + here + " diventa il riferimento: il conteggio del cavo riparte da 0 e a fine "
+                        + "osservazione il telescopio torna qui.")
                 .setNegativeButton("Annulla", null)
-                .setPositiveButton("Azzera", (d, w) -> sendCableLine("cmd|cable|zero"))
+                .setPositiveButton("Set", (d, w) -> sendCableLine("cmd|cable|set"))
                 .show();
     }
 
