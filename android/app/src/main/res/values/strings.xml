@@ -4,13 +4,14 @@
     <!-- Stessa cartella pubblica di ESA Meter / StarStacKadam. Legge vesperacontrol-version.json. -->
     <string name="mega_version_url" translatable="false">https://mega.nz/folder/6xgAFYqY#fvY3ii_8ytQtujuGIMATmQ</string>
 
+    <string name="tab_target">Target</string>
     <string name="tab_connessioni">Connessioni</string>
     <string name="tab_foto">Foto / Hard Disk</string>
     <string name="tab_telescopio">Telescopio</string>
     <string name="tab_sistema">Sistema</string>
     <string name="tab_notifiche">Notifiche</string>
     <string name="tab_anteprima">Anteprima</string>
-    <string name="tab_schermo">Schermo Pi</string>
+    <string name="tab_schermo">Controllo Pi</string>
     <string name="tab_impostazioni">Impostazioni</string>
 
     <string name="btn_connect">Connetti ADB</string>
@@ -50,6 +51,10 @@
     <string name="card_telegram">Notifiche Telegram</string>
     <string name="card_preview">Anteprima</string>
     <string name="card_scrcpy">Mirror scrcpy (opzionale)</string>
+    <string name="card_pi_power">Alimentazione Pi</string>
+    <string name="pi_power_hint">Comandi inviati al Pi via ADB. Dopo lo spegnimento il Pi si riaccende solo togliendo e ridando corrente.</string>
+    <string name="btn_pi_reboot">Riavvia Pi</string>
+    <string name="btn_pi_shutdown">Spegni Pi</string>
     <string name="btn_check_updates">Controlla aggiornamenti</string>
     <string name="btn_apply_system">Applica su Pi</string>
     <string name="label_updates">Aggiornamenti app</string>
@@ -77,7 +82,7 @@
     <string name="label_settings_ftp">Porte FTP</string>
     <string name="label_settings_scrcpy">Schermo / scrcpy</string>
     <string name="label_settings_network">Raspberry Pi: IP e porte</string>
-    <string name="hint_settings_network">Usati da Connessioni, Anteprima (FTP HD / Vespera) e Schermo Pi.</string>
+    <string name="hint_settings_network">Usati da Connessioni, Anteprima (FTP HD / Vespera) e Controllo Pi.</string>
     <string name="label_pi_address">Pi %1$s · ADB %2$d  (IP e porte in Impostazioni)</string>
     <string name="label_pi_address_missing">IP del Pi non impostato: inseriscilo in Impostazioni.</string>
     <string name="label_settings_site">Posizione osservatorio</string>

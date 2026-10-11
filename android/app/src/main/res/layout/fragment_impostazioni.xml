@@ -76,7 +76,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Porta FTP HD  ·  porta FTP Vespera  ·  porta ADB Schermo Pi"
+            android:text="Porta FTP HD  ·  porta FTP Vespera  ·  porta ADB Controllo Pi"
             android:textColor="@color/vespera_muted"
             android:textSize="12sp" />
 

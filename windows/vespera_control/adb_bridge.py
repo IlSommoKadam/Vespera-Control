@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -74,7 +75,7 @@ class AdbBridge:
         return out
 
     def push_text(self, remote: str, text: str) -> None:
-        local = Path(os.environ.get("TEMP") or ".") / "vespera_control_req.txt"
+        local = Path(os.environ.get("TEMP") or ".") / f"vespera_control_req_{threading.get_ident()}.txt"
         local.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
         proc = self._s("push", str(local), remote, timeout=20)
         if proc.returncode != 0:
@@ -82,7 +83,8 @@ class AdbBridge:
             raise AdbError(detail or "push remote.req fallito")
 
     def pull_text(self, remote: str) -> str:
-        local = Path(os.environ.get("TEMP") or ".") / "vespera_control_pull.txt"
+        # Un file per thread: lo stato riletto ogni secondo non deve mischiarsi con l'ack di un comando.
+        local = Path(os.environ.get("TEMP") or ".") / f"vespera_control_pull_{threading.get_ident()}.txt"
         if local.exists():
             local.unlink()
         proc = self._s("pull", remote, str(local), timeout=20)

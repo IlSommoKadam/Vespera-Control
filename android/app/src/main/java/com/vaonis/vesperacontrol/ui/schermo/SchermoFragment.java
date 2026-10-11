@@ -18,12 +18,14 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
+import com.vaonis.vesperacontrol.AdbBridgeHolder;
 import com.vaonis.vesperacontrol.DevicePrefs;
 import com.vaonis.vesperacontrol.R;
 import com.vaonis.vesperacontrol.ui.TabRefreshable;
 
 /**
- * Avvia Scrcpy-for-Android ({@code org.client.scrcpy}) con IP da Connessioni e porta/bitrate di questa tab.
+ * Tab Controllo Pi: avvia Scrcpy-for-Android ({@code org.client.scrcpy}) con IP da Connessioni e
+ * porta/bitrate di questa tab; riavvia o spegne il Pi via ADB.
  */
 public class SchermoFragment extends Fragment implements TabRefreshable {
 
@@ -34,6 +36,7 @@ public class SchermoFragment extends Fragment implements TabRefreshable {
     public static final String EXTRA_BITRATE = "mirror_bitrate";
 
     private TextView textIp;
+    private TextView textPower;
 
     @Nullable
     @Override
@@ -54,6 +57,35 @@ public class SchermoFragment extends Fragment implements TabRefreshable {
         onEdit(editBitrate, s -> DevicePrefs.setScrcpyBitrateMbps(requireContext(), s));
         showIp();
         btnOpen.setOnClickListener(v -> openMirror());
+        textPower = view.findViewById(R.id.textPiPower);
+        view.<Button>findViewById(R.id.btnPiReboot).setOnClickListener(v -> confirmPower(false));
+        view.<Button>findViewById(R.id.btnPiShutdown).setOnClickListener(v -> confirmPower(true));
+    }
+
+    /** Riavvio o spegnimento del Pi via ADB, sempre con conferma. */
+    private void confirmPower(boolean powerOff) {
+        if (!isAdded()) return;
+        String label = getString(powerOff ? R.string.btn_pi_shutdown : R.string.btn_pi_reboot);
+        new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                .setTitle("Conferma: " + label)
+                .setMessage(powerOff
+                        ? "Spegne il Raspberry Pi: Vespera Helper, sincronizzazione foto e piano della notte "
+                        + "si fermano. Per riaccenderlo bisogna togliere e ridare corrente.\n\nSpegnere il Pi?"
+                        : "Riavvia il Raspberry Pi: Vespera Helper torna disponibile dopo un paio di minuti. "
+                        + "Un'osservazione in corso sul telescopio continua.\n\nRiavviare il Pi?")
+                .setIcon(android.R.drawable.ic_dialog_alert)
+                .setNegativeButton("Annulla", null)
+                .setPositiveButton(label, (d, w) -> {
+                    textPower.setText(label + "…");
+                    AdbBridgeHolder.get(requireContext()).powerPi(powerOff, (ok, msg) -> {
+                        if (!isAdded()) return;
+                        requireActivity().runOnUiThread(() -> {
+                            textPower.setText(msg);
+                            Toast.makeText(requireContext(), ok ? msg : "Non riuscito", Toast.LENGTH_LONG).show();
+                        });
+                    });
+                })
+                .show();
     }
 
     @Override

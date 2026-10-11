@@ -35,13 +35,15 @@ import com.vaonis.vesperacontrol.ui.notifiche.NotificheFragment;
 import com.vaonis.vesperacontrol.ui.schermo.SchermoFragment;
 import com.vaonis.vesperacontrol.ui.settings.ImpostazioniFragment;
 import com.vaonis.vesperacontrol.ui.sistema.SistemaFragment;
+import com.vaonis.vesperacontrol.ui.target.TargetFragment;
 import com.vaonis.vesperacontrol.ui.telescopio.TelescopioFragment;
 import com.vaonis.vesperacontrol.update.AppUpdates;
 
 public class MainActivity extends AppCompatActivity {
 
-    /** Stesso ordine della app Windows: Connessioni all'inizio, Impostazioni in fondo. */
+    /** Stesso ordine della app Windows: Target all'inizio, Impostazioni in fondo. */
     private static final int[] TAB_TITLES = {
+            R.string.tab_target,
             R.string.tab_connessioni,
             R.string.tab_foto,
             R.string.tab_telescopio,
@@ -51,8 +53,9 @@ public class MainActivity extends AppCompatActivity {
             R.string.tab_schermo,
             R.string.tab_impostazioni
     };
-    private static final int TAB_CONNESSIONI = 0;
-    private static final int TAB_IMPOSTAZIONI = 7;
+    private static final int TAB_TARGET = 0;
+    private static final int TAB_CONNESSIONI = 1;
+    private static final int TAB_IMPOSTAZIONI = 8;
 
     private TabLayout tabLayout;
     private ViewPager2 viewPager;
@@ -279,19 +282,21 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public Fragment createFragment(int position) {
             switch (position) {
+                case TAB_TARGET:
+                    return new TargetFragment();
                 case TAB_CONNESSIONI:
                     return new ConnessioniFragment();
-                case 1:
-                    return new FotoFragment();
                 case 2:
-                    return new TelescopioFragment();
+                    return new FotoFragment();
                 case 3:
-                    return new SistemaFragment();
+                    return new TelescopioFragment();
                 case 4:
-                    return new NotificheFragment();
+                    return new SistemaFragment();
                 case 5:
-                    return new AnteprimaFragment();
+                    return new NotificheFragment();
                 case 6:
+                    return new AnteprimaFragment();
+                case 7:
                     return new SchermoFragment();
                 case TAB_IMPOSTAZIONI:
                 default:

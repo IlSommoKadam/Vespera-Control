@@ -4,7 +4,7 @@ Client all-in-one per pilotare l’osservatorio dal PC. Sul Pi resta **Vespera H
 
 1. **Helper remoto** — comandi/settings via ADB → RemoteBridge su Helper
 2. **Anteprima** — FTP oggetti + ultimo `*-output.jpg` (senza stacking); clic sull’immagine per livelli / autostretch / salva / condividi
-3. **Schermo Pi** — scrcpy desktop (opzionale)
+3. **Controllo Pi** — scrcpy desktop (opzionale), riavvio e spegnimento del Pi
 
 ## Requisiti
 

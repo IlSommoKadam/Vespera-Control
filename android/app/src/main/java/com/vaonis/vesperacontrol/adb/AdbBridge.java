@@ -213,6 +213,37 @@ public final class AdbBridge {
         sendLine(cmd, callback);
     }
 
+    /**
+     * Riavvia ({@code powerOff} falso) o spegne il Pi con {@code reboot} via shell ADB.
+     * Il Pi chiude la connessione mentre esegue: un errore di rete dopo l'invio vale come riuscito.
+     */
+    public void powerPi(boolean powerOff, ResultCallback callback) {
+        executor.execute(() -> {
+            AdbClient c;
+            try {
+                c = live();
+            } catch (IOException e) {
+                deliver(callback, false, failText(e, "Pi non raggiungibile"));
+                return;
+            }
+            String done = powerOff ? "Spegnimento del Pi avviato" : "Riavvio del Pi avviato";
+            try {
+                String out = c.shell(powerOff ? "reboot -p" : "reboot").trim();
+                if (!out.isEmpty()) {
+                    deliver(callback, false, out);
+                    return;
+                }
+            } catch (AdbClient.RemoteFail e) {
+                deliver(callback, false, failText(e, "Comando rifiutato dal Pi"));
+                return;
+            } catch (IOException gone) {
+                Log.i(TAG, "powerPi: connessione chiusa dal Pi");
+            }
+            closeClient(done);
+            deliver(callback, true, done);
+        });
+    }
+
     public void pullState(File localDest, ResultCallback callback) {
         pullRemote(REMOTE_STATE, localDest, callback);
     }

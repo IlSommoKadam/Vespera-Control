@@ -144,6 +144,7 @@ def tel_actions_allowed(tel: dict) -> dict:
         "resume": not moving and tel.get("canResumeObservation", True) is not False,
         "shutdown": True,
         "azRelative": not moving,
+        "moving": moving,
     }
 
 
@@ -436,24 +437,25 @@ class App(tk.Tk):
         page_host = ttk.Frame(self)
         page_host.pack(fill="both", expand=True, padx=16, pady=(4, 8))
 
-        # Stesso ordine dell'APK: Connessioni all'inizio, Impostazioni in fondo
+        # Stesso ordine dell'APK: Target all'inizio, Impostazioni in fondo
         specs = (
+            ("tgt", "Target", "tab_tgt"),
             ("conn", "Connessioni", "tab_conn"),
             ("foto", "Foto / Hard Disk", "tab_foto"),
             ("tel", "Telescopio", "tab_tel"),
             ("sys", "Sistema", "tab_sys"),
             ("tg", "Notifiche", "tab_tg"),
             ("prev", "Anteprima", "tab_prev"),
-            ("scr", "Schermo Pi", "tab_scr"),
+            ("scr", "Controllo Pi", "tab_scr"),
             ("imp", "Impostazioni", "tab_imp"),
         )
         for index, (key, title, attr) in enumerate(specs):
             tab_bar.columnconfigure(index, weight=1, uniform="tabs")
             page = ttk.Frame(page_host, padding=12)
             self._pages[key] = page
-            if key == "tel":
-                # Telescopio scorre in verticale: Osserva + Preferiti + Piano non stanno in una schermata.
-                setattr(self, attr, self._scrollable(page))
+            if key in ("tgt", "tel"):
+                # Target (Osserva + Preferiti + Piano) e Telescopio scorrono in verticale.
+                setattr(self, attr, self._scrollable(page, key))
             else:
                 setattr(self, attr, page)
 
@@ -475,6 +477,7 @@ class App(tk.Tk):
             cell.bind("<Button-1>", lambda _e, k=key: self._select_tab(k))
             self._tab_labels[key] = (cell, label)
 
+        self._build_target()
         self._build_conn()
         for var in (self.pi_host, self.adb_port, self.ftp_hd_port, self.ftp_vespera_port, self.ftp_source):
             var.trace_add("write", lambda *_a: self._refresh_shared_ip())
@@ -486,7 +489,7 @@ class App(tk.Tk):
         self._build_preview()
         self._build_scrcpy()
         self._build_settings()
-        self._select_tab("conn", initial=True)
+        self._select_tab("tgt", initial=True)
 
         foot = ttk.Frame(self, padding=(16, 0, 16, 12))
         foot.pack(fill="x")
@@ -529,7 +532,7 @@ class App(tk.Tk):
             self._refresh_tab(key)
 
     def _refresh_tab(self, key: str) -> None:
-        if key == "tel":
+        if key == "tgt":
             self.refresh_favorites()
         if key == "prev":
             self.load_objects(from_tab=True)
@@ -539,11 +542,11 @@ class App(tk.Tk):
             return
         if key == "scr":
             running = self._scrcpy is not None and self._scrcpy.poll() is None
-            self.set_status("scrcpy in esecuzione." if running else "Scheda Schermo Pi.", "ok" if running else "info")
+            self.set_status("scrcpy in esecuzione." if running else "Scheda Controllo Pi.", "ok" if running else "info")
             return
         self.refresh_state()
 
-    def _scrollable(self, page: ttk.Frame) -> ttk.Frame:
+    def _scrollable(self, page: ttk.Frame, key: str) -> ttk.Frame:
         canvas = tk.Canvas(page, bg=BG, highlightthickness=0, borderwidth=0)
         bar = ttk.Scrollbar(page, orient="vertical", command=canvas.yview)
         inner = ttk.Frame(canvas)
@@ -555,12 +558,12 @@ class App(tk.Tk):
         canvas.pack(side="left", fill="both", expand=True)
 
         def wheel(event) -> None:
-            if self._active_tab == "tel":
+            if self._active_tab == key:
                 canvas.yview_scroll(int(-event.delta / 120) or (-1 if event.delta > 0 else 1), "units")
 
         canvas.bind_all("<MouseWheel>", wheel, add="+")
-        canvas.bind_all("<Button-4>", lambda _e: self._active_tab == "tel" and canvas.yview_scroll(-1, "units"), add="+")
-        canvas.bind_all("<Button-5>", lambda _e: self._active_tab == "tel" and canvas.yview_scroll(1, "units"), add="+")
+        canvas.bind_all("<Button-4>", lambda _e: self._active_tab == key and canvas.yview_scroll(-1, "units"), add="+")
+        canvas.bind_all("<Button-5>", lambda _e: self._active_tab == key and canvas.yview_scroll(1, "units"), add="+")
         return inner
 
     def _card(self, parent: ttk.Frame, title: str) -> ttk.Frame:
@@ -673,7 +676,8 @@ class App(tk.Tk):
         )
         self._foto_tick_running = False
         self.after(3000, self._foto_tick)
-        self.after(5000, self._tel_tick)
+        self._tel_ticks = 0
+        self.after(1000, self._tel_tick)
 
     SYNC_PHASE = {
         "list": "lettura elenco",
@@ -690,9 +694,10 @@ class App(tk.Tk):
             self._silent_state_refresh()
 
     def _tel_tick(self) -> None:
-        """Rilegge remote.state.json ogni 5 s mentre il tab Telescopio è aperto (silenzioso)."""
-        self.after(5000, self._tel_tick)
-        if self._active_tab == "tel":
+        """Rilegge remote.state.json in silenzio: ogni secondo nel tab Telescopio, ogni 5 s in Target."""
+        self.after(1000, self._tel_tick)
+        self._tel_ticks += 1
+        if self._active_tab == "tel" or (self._active_tab == "tgt" and self._tel_ticks % 5 == 0):
             self._silent_state_refresh()
 
     def _silent_state_refresh(self) -> None:
@@ -835,9 +840,11 @@ class App(tk.Tk):
         self._tel_btns["azGo"] = ttk.Button(go_row, text="Vai", style="Primary.TButton",
                                             command=self.motor_move)
         self._tel_btns["azGo"].pack(side="left")
-        # Sempre attivo: ferma il movimento in corso (anche il riposizionamento automatico).
-        ttk.Button(go_row, text="■ Stop", style="Danger.TButton",
-                   command=self.az_stop).pack(side="left", padx=(6, 0))
+        # Ferma il movimento in corso (anche il riposizionamento automatico): attivo solo se
+        # qualcosa si muove, vedi _update_tel_buttons.
+        self._stop_move_btn = ttk.Button(go_row, text="■ Stop movimento", style="Danger.TButton",
+                                         command=self.az_stop)
+        self._stop_move_btn.pack(side="left", padx=(6, 0))
         ttk.Label(card, style="Card.TLabel", wraplength=900,
                   text="Relativo: +5 / −10 muove l'asse di quei gradi dalla posizione attuale (max ±180°). "
                        "Assoluto: porta l'asse alla posizione (AZ 0…360°, ALT −90…90°; −90° = braccio chiuso). "
@@ -858,6 +865,9 @@ class App(tk.Tk):
         self.tel_details_frame = ttk.Frame(card, style="Card.TFrame")
         self.tel_details_frame.pack(fill="x")
         self._tel_details_rows: list | None = None
+
+    def _build_target(self) -> None:
+        """Tab Target: cerca un oggetto, preferiti e piano della notte."""
         self._build_observe()
         self._build_favorites()
 
@@ -996,10 +1006,51 @@ class App(tk.Tk):
         )
         ttk.Button(btns, text="Chiudi scrcpy", command=self.stop_scrcpy).pack(side="left")
 
+        power = self._card(self.tab_scr, "Alimentazione Pi")
+        ttk.Label(power, style="Muted.TLabel", wraplength=900,
+                  text="Comandi inviati al Pi via ADB. Dopo lo spegnimento il Pi si riaccende solo "
+                       "togliendo e ridando corrente.").pack(anchor="w", pady=(0, 8))
+        row = ttk.Frame(power, style="Card.TFrame")
+        row.pack(fill="x")
+        ttk.Button(row, text="Riavvia Pi", style="Warn.TButton",
+                   command=lambda: self.pi_power(False)).pack(side="left", padx=(0, 6))
+        ttk.Button(row, text="Spegni Pi", style="Danger.TButton",
+                   command=lambda: self.pi_power(True)).pack(side="left")
+
+    def pi_power(self, power_off: bool) -> None:
+        """Riavvia o spegne il Pi con ``reboot`` via shell ADB, sempre con conferma."""
+        label = "Spegni Pi" if power_off else "Riavvia Pi"
+        question = (
+            "Spegne il Raspberry Pi: Vespera Helper, sincronizzazione foto e piano della notte si fermano. "
+            "Per riaccenderlo bisogna togliere e ridare corrente.\n\nSpegnere il Pi?"
+            if power_off else
+            "Riavvia il Raspberry Pi: Vespera Helper torna disponibile dopo un paio di minuti. "
+            "Un'osservazione in corso sul telescopio continua.\n\nRiavviare il Pi?"
+        )
+        if not messagebox.askokcancel(f"Conferma: {label}", question, icon="warning",
+                                      default="cancel", parent=self):
+            self.set_status(f"{label}: annullato.", "info")
+            return
+
+        def job() -> None:
+            bridge = self.ensure_bridge()
+            bridge.connect()
+            self.queue.put(("log", f"> adb shell {'reboot -p' if power_off else 'reboot'}"))
+            try:
+                out = bridge.shell("reboot -p" if power_off else "reboot", timeout=15)
+            except AdbError:
+                out = ""  # il Pi chiude la connessione mentre esegue
+            if out:
+                raise AdbError(f"{label}: {out}")
+            self.queue.put(("status", "Spegnimento del Pi avviato." if power_off
+                            else "Riavvio del Pi avviato.", "ok"))
+
+        self.run_job(job)
+
     # ------------------------------------------------------------------ Osserva (come APK)
 
     def _build_observe(self) -> None:
-        card = self._card(self.tab_tel, "Osserva")
+        card = self._card(self.tab_tgt, "Osserva")
         card.pack_configure(fill="both", expand=True)
         self._obs_card = card
         ttk.Label(
@@ -1281,7 +1332,7 @@ class App(tk.Tk):
     # ------------------------------------------------------------------ Preferiti (come APK)
 
     def _build_favorites(self) -> None:
-        card = self._card(self.tab_tel, "Preferiti")
+        card = self._card(self.tab_tgt, "Preferiti")
         ttk.Label(
             card,
             text="Ordinati per visibilità nella notte scelta (meteo + altezza). Clicca un oggetto per aprirlo.",
@@ -1832,7 +1883,7 @@ class App(tk.Tk):
 
     def _build_settings(self) -> None:
         net = self._card(self.tab_imp, "Raspberry Pi: IP e porte")
-        ttk.Label(net, text="Usati da Connessioni, Anteprima (FTP HD / Vespera) e Schermo Pi.",
+        ttk.Label(net, text="Usati da Connessioni, Anteprima (FTP HD / Vespera) e Controllo Pi.",
                   style="Muted.TLabel").pack(anchor="w", pady=(0, 6))
         row = ttk.Frame(net, style="Card.TFrame")
         row.pack(fill="x")
@@ -2106,7 +2157,7 @@ class App(tk.Tk):
         if not messagebox.askokcancel(
             "Conferma: Movimento",
             what + "\nIl telescopio si muove davvero: controlla che nulla ostacoli il movimento."
-            + warn + "\n\nPuoi fermarlo con «Stop».\n\nInviare il comando al telescopio?",
+            + warn + "\n\nPuoi fermarlo con «Stop movimento».\n\nInviare il comando al telescopio?",
             icon="warning",
             default="cancel",
             parent=self,
@@ -2201,6 +2252,9 @@ class App(tk.Tk):
             action = "azRelative" if key.startswith("az") else key
             on = allowed.get(action) and not (moving and key.startswith("az"))
             btn.state(["!disabled"] if on else ["disabled"])
+        # Senza tracking e a osservazione ferma (e nessun movimento manuale) non c'è nulla da fermare.
+        stop_on = bool(allowed) and (allowed.get("moving") or moving)
+        self._stop_move_btn.state(["!disabled"] if stop_on else ["disabled"])
 
     def _tel_result(self, action: str, ok: bool, ack: str) -> None:
         label = TEL_ACTIONS.get(action, (action,))[0]
