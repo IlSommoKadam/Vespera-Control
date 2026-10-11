@@ -53,7 +53,7 @@ cmd|plan|cancel
 ### Giri del cavo (Helper ≥ 0.8.47)
 
 L'Helper somma le variazioni dell'AZ (`motors.AZ.position`, ognuna riportata in −180…+180°; campioni ogni 3 s in movimento, 15 s da fermo). Il park (`seekStop` di ALT/AZ/MAP) viene contato come gli altri movimenti. Di giorno, braccio chiuso e telescopio fermo da 5 min, con almeno mezzo giro srotola da solo i giri interi (`−360·round(giri)`) a passi di 90°, una volta al giorno. `cmd|cable|unwind` srotola tutto il conteggio, `cmd|cable|zero` lo azzera (cavo raddrizzato a mano), `cmd|cable|auto|on|off` attiva lo srotolamento automatico.
-Stato in `remote.state.json` → `cable`: `{turnsDeg, turns, auto, busy, activity, lastResult, lastSampleAt, az, alt, refAz, obsTarget, obsStartAz, obsStartAlt}`.
+Stato in `remote.state.json` → `cable`: `{turnsDeg, turns, auto, busy, activity, lastResult, lastSampleAt, az, alt, refAz, obsTarget, obsStartAz, obsStartAlt, log}`. `log` (Helper ≥ 0.8.50) = ultime 15 righe del registro movimenti `motion.log` (nella cartella dell'Helper, 300 righe), la più recente per prima.
 
 ### Set e riposizionamento a fine osservazione (Helper ≥ 0.8.49)
 

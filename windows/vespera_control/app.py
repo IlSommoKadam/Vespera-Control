@@ -861,6 +861,10 @@ class App(tk.Tk):
         ttk.Checkbutton(cable_btns, text="Riposiziona da solo al Set (fine osservazione e di giorno)",
                         variable=self.cable_auto, command=self.cable_set_auto).pack(side="left")
         self._update_tel_buttons({})
+        ttk.Label(card, text="Registro movimenti", style="Section.TLabel").pack(anchor="w", pady=(12, 2))
+        self.motion_log_text = tk.StringVar(value="—")
+        ttk.Label(card, textvariable=self.motion_log_text, style="Card.TLabel", justify="left",
+                  wraplength=900).pack(anchor="w")
         ttk.Label(card, text="Stato dettagliato (Helper)", style="Section.TLabel").pack(anchor="w", pady=(12, 4))
         self.tel_details_frame = ttk.Frame(card, style="Card.TFrame")
         self.tel_details_frame.pack(fill="x")
@@ -2211,6 +2215,11 @@ class App(tk.Tk):
     def _apply_cable(self, cable: dict | None) -> None:
         if not hasattr(self, "cable_text"):
             return
+        log = (cable or {}).get("log")
+        if log is None:
+            self.motion_log_text.set("Registro non disponibile: aggiorna Vespera Helper (≥ 0.8.50).")
+        else:
+            self.motion_log_text.set("\n".join(str(x) for x in log) or "Nessun movimento registrato.")
         if not cable:
             self.cable_text.set("Cavo: conteggio non disponibile (aggiorna Vespera Helper ≥ 0.8.47).")
             self.motor_pos_text.set("Posizione: AZ —  ·  ALT —")

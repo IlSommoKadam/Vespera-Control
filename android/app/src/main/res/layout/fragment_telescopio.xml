@@ -211,6 +211,23 @@
             android:textColor="@color/vespera_muted" />
 
         <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Registro movimenti"
+            android:textColor="@color/vespera_title"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/textMotionLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="—"
+            android:textColor="@color/vespera_text_secondary"
+            android:textSize="12sp" />
+
+        <TextView
             android:id="@+id/textTelescopioLog"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

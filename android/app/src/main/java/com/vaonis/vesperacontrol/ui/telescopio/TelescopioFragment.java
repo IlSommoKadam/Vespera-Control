@@ -109,6 +109,7 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         // "Stop movimento" attivo solo se qualcosa si muove: vedi stopMoveAllowed.
         bindTelButton(view, R.id.btnAzStop, "azStop", v -> sendAzStop());
         textCable = view.findViewById(R.id.textCable);
+        textMotionLog = view.findViewById(R.id.textMotionLog);
         view.<Button>findViewById(R.id.btnCableZero).setOnClickListener(v -> confirmCableZero());
         checkCableAuto = view.findViewById(R.id.checkCableAuto);
         checkCableAuto.setOnClickListener(v -> sendCableLine(
@@ -315,6 +316,7 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
 
     private android.widget.EditText editAzStep;
     private TextView textCable;
+    private TextView textMotionLog;
     private android.widget.RadioButton radioModeAbs;
     /** Fino a quando considerare il telescopio in movimento (posizione appena cambiata o comando inviato). */
     private long motionBusyUntil;
@@ -329,6 +331,7 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
     /** Riga "Cavo" dal blocco {@code cable} di remote.state.json (Helper ≥ 0.8.47). */
     private void showCable(JSONObject cable) {
         if (textCable == null) return;
+        showMotionLog(cable == null ? null : cable.optJSONArray("log"));
         if (cable == null) {
             textCable.setText("Cavo: conteggio non disponibile (aggiorna Vespera Helper ≥ 0.8.47).");
             if (textMotorPos != null) textMotorPos.setText("Posizione: AZ —  ·  ALT —");
@@ -371,6 +374,25 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
         }
         prevAz = az;
         prevAlt = alt;
+    }
+
+    /** Ultimi movimenti registrati dall'Helper (≥ 0.8.50), il più recente per primo. */
+    private void showMotionLog(@Nullable JSONArray log) {
+        if (textMotionLog == null) return;
+        if (log == null) {
+            textMotionLog.setText("Registro non disponibile: aggiorna Vespera Helper (≥ 0.8.50).");
+            return;
+        }
+        if (log.length() == 0) {
+            textMotionLog.setText("Nessun movimento registrato.");
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < log.length(); i++) {
+            if (i > 0) sb.append('\n');
+            sb.append(log.optString(i));
+        }
+        textMotionLog.setText(sb);
     }
 
     /** Stop immediato di AZ e ALT: nessuna conferma, funziona anche con un comando in corso. */
