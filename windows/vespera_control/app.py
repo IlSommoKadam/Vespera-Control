@@ -648,7 +648,7 @@ class App(tk.Tk):
         ttk.Button(row, text="Monta", style="Primary.TButton", command=lambda: self.cmd("cmd|hd|mount|")).pack(
             side="left", padx=(0, 6)
         )
-        ttk.Button(row, text="Spegni HD", style="Danger.TButton", command=lambda: self.cmd("cmd|hd|eject|")).pack(
+        ttk.Button(row, text="Espelli (spegni) HD", style="Danger.TButton", command=lambda: self.cmd("cmd|hd|eject|")).pack(
             side="left", padx=(0, 6)
         )
         ttk.Button(row, text="Attiva HD", style="TButton", command=lambda: self.cmd("cmd|hd|wake")).pack(

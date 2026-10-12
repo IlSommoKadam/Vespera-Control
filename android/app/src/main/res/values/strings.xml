@@ -20,7 +20,7 @@
     <string name="btn_park">Park</string>
     <string name="btn_unpark">Init</string>
     <string name="btn_mount_hd">Monta</string>
-    <string name="btn_unmount_hd">Spegni HD</string>
+    <string name="btn_unmount_hd">Espelli (spegni) HD</string>
     <string name="btn_hd_wake">Attiva HD</string>
     <string name="btn_goto">Riprendi</string>
     <string name="btn_abort">Stop</string>
