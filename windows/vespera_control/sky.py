@@ -967,12 +967,15 @@ def face_image(level: int, size: int = 18):
     for cx in (8.6, 15.4):
         d.ellipse([(cx - 1.5) * k, 6.7 * k, (cx + 1.5) * k, 9.7 * k], fill=ink)
     w = max(2, int(1.9 * k))
-    if level == GREAT:
-        d.arc([6.8 * k, 8.6 * k, 17.2 * k, 18.0 * k], 20, 160, fill=ink, width=w)
+    if level == GREAT:  # sorriso aperto
+        d.chord([7 * k, 9.2 * k, 17 * k, 17.6 * k], 0, 180, fill=ink)
     elif level == GOOD:
         d.arc([7.8 * k, 11.0 * k, 16.2 * k, 17.0 * k], 25, 155, fill=ink, width=w)
     elif level == POOR:
         d.line([8 * k, 15.6 * k, 16 * k, 15.6 * k], fill=ink, width=w)
+    elif level == WEATHER_BLOCK:  # bocca ondulata: è una previsione
+        wave = [((7.6 + 8.8 * i / 24) * k, (16 - 1.3 * math.sin(math.tau * i / 24)) * k) for i in range(25)]
+        d.line(wave, fill=ink, width=w, joint="curve")
     else:
         d.arc([8 * k, 14.6 * k, 16 * k, 20.0 * k], 205, 335, fill=ink, width=w)
     return img.resize((size, size), Image.Resampling.LANCZOS)
