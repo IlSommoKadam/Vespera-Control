@@ -21,6 +21,10 @@ public final class SkyCatalog {
     private static final String PREVIEW_HOST = "alasky.cds.unistra.fr";
     private static final String PANSTARRS = "CDS/P/PanSTARRS/DR1/color-z-zg-g";
     private static final String DSS_COLOR = "CDS/P/DSS2/color";
+    /** SESAME passa da solo al mirror di SIMBAD quando Strasburgo è lento: gli serve tempo. */
+    private static final int SESAME_TIMEOUT_MS = 30_000;
+    /** La dimensione serve solo per il campo della foto: se SIMBAD è lento si usa quello standard. */
+    private static final int SIZE_TIMEOUT_MS = 8_000;
     /** Sigle di oggetti non stellari (nebulose, galassie, ammassi) da preferire alla stella. */
     private static final Pattern DSO_ID = Pattern.compile(
             "(?i)^(M|NGC|IC)\\s+\\d+[A-Z]?$|^Sh\\s*2-\\d+$|^(LBN|LDN|Ced|vdB|RCW|Gum)\\s+\\d+$|^Barnard\\s+\\d+$");
@@ -105,23 +109,33 @@ public final class SkyCatalog {
         return new Target(name, parsed.name, parsed.typeCode, parsed.raDeg, parsed.decDeg, jpeg);
     }
 
-    /** SESAME senza scaricare la foto. Null se il nome non esiste. */
+    /** SESAME senza scaricare la foto. Null se il nome non esiste o il servizio non risponde. */
     static Hit sesameHit(String query) {
-        String name = query == null ? "" : query.trim();
-        if (name.isEmpty()) return null;
         try {
-            if (name.length() > 80) name = name.substring(0, 80);
-            String path = "/cgi-bin/nph-sesame/-oxI/S?"
-                    + URLEncoder.encode(name, StandardCharsets.UTF_8.name());
-            HttpsFetch.Result page = HttpsFetch.get(SESAME_HOST, path);
-            if (page.code < 200 || page.code >= 300) return null;
-            Target parsed = parseSesame(name, page.body);
-            return preferDso(name,
-                    new Hit(cleanId(parsed.name), parsed.typeCode, parsed.raDeg, parsed.decDeg),
-                    aliases(page.body));
+            return sesame(query);
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    /** Come {@link #sesameHit} ma distingue: null = nome inesistente, eccezione = servizio non raggiunto. */
+    static Hit sesame(String query) throws Exception {
+        String name = query == null ? "" : query.trim();
+        if (name.isEmpty()) return null;
+        if (name.length() > 80) name = name.substring(0, 80);
+        String path = "/cgi-bin/nph-sesame/-oxI/S?"
+                + URLEncoder.encode(name, StandardCharsets.UTF_8.name());
+        HttpsFetch.Result page = HttpsFetch.get(SESAME_HOST, path, SESAME_TIMEOUT_MS);
+        if (page.code < 200 || page.code >= 300) throw new Exception("HTTP " + page.code);
+        Target parsed;
+        try {
+            parsed = parseSesame(name, page.body);
+        } catch (Exception notFound) {
+            return null;
+        }
+        return preferDso(name,
+                new Hit(cleanId(parsed.name), parsed.typeCode, parsed.raDeg, parsed.decDeg),
+                aliases(page.body));
     }
 
     /** Toglie gli spazi doppi di SIMBAD: "NGC  6888" → "NGC 6888". */
@@ -352,7 +366,7 @@ public final class SkyCatalog {
             String path = "/simbad/sim-id?Ident="
                     + URLEncoder.encode(objectName, StandardCharsets.UTF_8.name())
                     + "&output.format=ASCII";
-            HttpsFetch.Result page = HttpsFetch.get(SIMBAD_HOST, path);
+            HttpsFetch.Result page = HttpsFetch.get(SIMBAD_HOST, path, SIZE_TIMEOUT_MS);
             if (page.code < 200 || page.code >= 300) return 0;
             return parseAngularSize(page.body);
         } catch (Exception ignored) {

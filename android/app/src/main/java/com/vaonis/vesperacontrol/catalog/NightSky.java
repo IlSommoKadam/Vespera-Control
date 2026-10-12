@@ -20,7 +20,8 @@ import java.util.Map;
  * Visibilità della notte corrente al sito. Un unico giudizio ogni 15 minuti
  * che combina meteo (nubi/pioggia) e, se c'è un oggetto, la sua altezza:
  * vale sempre il fattore peggiore dei due.
- * Livelli: 3 ottima (blu), 2 buona (verde), 1 scarsa (giallo), 0 non visibile (rosso).
+ * Livelli: 3 ottima (blu), 2 buona (verde), 1 scarsa (giallo), 0 non visibile:
+ * rosso se l'oggetto è troppo basso (certo), arancione se è solo il meteo (previsione).
  */
 public final class NightSky {
 
@@ -38,10 +39,17 @@ public final class NightSky {
     public static final class Line {
         public final int level;
         public final String text;
+        /** Non visibile solo per il meteo (nubi/pioggia): faccina arancione invece che rossa. */
+        public final boolean weather;
 
         Line(int level, String text) {
+            this(level, text, false);
+        }
+
+        Line(int level, String text, boolean weather) {
             this.level = level;
             this.text = text;
+            this.weather = weather;
         }
     }
 
@@ -56,9 +64,11 @@ public final class NightSky {
         boolean hasObject = objectName != null;
         ZoneId zone = ZoneId.systemDefault();
         Map<LocalDateTime, Integer> weather = null;
+        Map<LocalDateTime, int[]> raw = null;
         Weather w = weatherCached(latDeg, lonDeg);
         if (w != null) {
             weather = w.levels;
+            raw = w.raw;
             if (w.zone != null) zone = w.zone;
         }
 
@@ -75,8 +85,9 @@ public final class NightSky {
                 double sunAlt = SkyCatalog.altAz(latDeg, lonDeg, sun[0], sun[1], utc)[0];
                 if (sunAlt >= -6) continue;
                 int sky = GREAT;
+                LocalDateTime hour = cursor.toLocalDateTime().truncatedTo(ChronoUnit.HOURS);
                 if (weather != null) {
-                    Integer v = weather.get(cursor.toLocalDateTime().truncatedTo(ChronoUnit.HOURS));
+                    Integer v = weather.get(hour);
                     sky = v == null ? GREAT : v;
                 }
                 int high = GREAT;
@@ -85,7 +96,7 @@ public final class NightSky {
                     if (alt > maxAlt) maxAlt = alt;
                     high = altitudeLevel(alt);
                 }
-                slots.add(new Slot(cursor, sky, high));
+                slots.add(new Slot(cursor, sky, high, raw == null ? null : raw.get(hour)));
             }
             // Notte già finita (mattina): mostra la prossima.
             boolean over = !slots.isEmpty()
@@ -112,9 +123,12 @@ public final class NightSky {
             }
         }
         String who = hasObject ? (objectName.trim().isEmpty() ? "Oggetto" : objectName.trim().replaceAll("\\s+", " ")) : "Cielo";
-        String head = who + " stanotte: " + (best == NOT_VISIBLE ? "non visibile" : "al meglio " + grade(best));
+        // Non visibile: per il meteo (arancione) se per altezza si vedrebbe, altrimenti troppo basso (rosso)
+        boolean blocked = best == NOT_VISIBLE && highEnough(slots);
+        String head = who + " stanotte: " + (best != NOT_VISIBLE ? "al meglio " + grade(best)
+                : blocked ? "non visibile per il meteo" : "non visibile, troppo basso");
         if (hasObject && maxAlt > -90) head += String.format(Locale.ITALY, " · max %.0f°", maxAlt);
-        lines.add(new Line(best, head));
+        lines.add(new Line(best, head, blocked));
         if (hasObject) {
             // Tempo utile (buona o ottima) in tutta la notte e da adesso
             ZonedDateTime now = ZonedDateTime.now(zone);
@@ -129,22 +143,63 @@ public final class NightSky {
                     + " stanotte · " + duration(fromNow) + " da adesso"));
         }
 
-        for (int level = GREAT; level >= NOT_VISIBLE; level--) {
+        for (int level = GREAT; level >= POOR; level--) {
             final int wanted = level;
-            String r = ranges(slots, s -> s.level() == wanted);
-            if (!r.isEmpty()) lines.add(new Line(level, label(level) + "  " + r));
+            SlotTest test = s -> s.level() == wanted;
+            String r = ranges(slots, test);
+            if (r.isEmpty()) continue;
+            // Solo cielo: la scarsa dipende sempre dal meteo, si dice subito perché
+            String why = !hasObject && level == POOR ? weatherCause(slots, test) : "";
+            lines.add(new Line(level, label(level) + "  " + r + (why.isEmpty() ? "" : " · " + why)));
         }
+        // Non visibile, due righe: meteo (arancione, è una previsione) e oggetto basso (rosso, è certo)
+        SlotTest cloudy = s -> s.level() == NOT_VISIBLE && s.high > NOT_VISIBLE;
+        SlotTest tooLow = s -> s.high == NOT_VISIBLE;
+        String r = ranges(slots, cloudy);
+        if (!r.isEmpty()) {
+            String why = weatherCause(slots, cloudy);
+            lines.add(new Line(NOT_VISIBLE, "Non visibile per il meteo  " + r
+                    + (why.isEmpty() ? "" : " · " + why), true));
+        }
+        r = ranges(slots, tooLow);
+        if (!r.isEmpty()) lines.add(new Line(NOT_VISIBLE, "Non visibile  " + r + " · oggetto sotto 15°"));
 
         if (weather == null) {
             lines.add(new Line(NONE, "Meteo non raggiungibile: conta solo l'altezza dell'oggetto."));
         } else if (hasObject) {
-            String clouds = ranges(slots, s -> s.sky < GOOD && s.sky <= s.high);
+            SlotTest byClouds = s -> s.sky < GOOD && s.sky <= s.high;
+            String clouds = ranges(slots, byClouds);
             String low = ranges(slots, s -> s.high < GOOD && s.high <= s.sky);
             if (!clouds.isEmpty() || !low.isEmpty()) lines.add(new Line(NONE, "Perché:"));
-            if (!clouds.isEmpty()) lines.add(new Line(NONE, "  nuvole/pioggia  " + clouds));
-            if (!low.isEmpty()) lines.add(new Line(NONE, "  oggetto basso  " + low));
+            if (!clouds.isEmpty()) {
+                String why = weatherCause(slots, byClouds);
+                lines.add(new Line(NONE, "  nuvole/pioggia  " + clouds + (why.isEmpty() ? "" : " · " + why)));
+            }
+            if (!low.isEmpty()) lines.add(new Line(NONE, "  oggetto basso (sotto 30°)  " + low));
         }
         return lines;
+    }
+
+    /** Vero se, contando solo l'altezza, l'oggetto si vedrebbe per almeno 30 minuti (≥ 15°). */
+    private static boolean highEnough(List<Slot> slots) {
+        int minutes = 0;
+        for (Slot s : slots) if (s.high > NOT_VISIBLE) minutes += STEP_MIN;
+        return minutes >= HEADLINE_MIN;
+    }
+
+    /** "pioggia fino a 85%, nubi fino a 100%" sui quarti d'ora scelti; vuoto se non c'è il dato. */
+    private static String weatherCause(List<Slot> slots, SlotTest test) {
+        int cloud = -1;
+        int pop = -1;
+        for (Slot s : slots) {
+            if (!test.test(s)) continue;
+            cloud = Math.max(cloud, s.cloud);
+            pop = Math.max(pop, s.pop);
+        }
+        List<String> parts = new ArrayList<>();
+        if (pop >= 30) parts.add("pioggia fino a " + pop + "%");
+        if (cloud >= 50) parts.add("nubi fino a " + cloud + "%");
+        return String.join(", ", parts);
     }
 
     private static final class Weather {
@@ -169,9 +224,13 @@ public final class NightSky {
         public final int bestMinutes;
         public final double maxAlt;
         public final String bestRanges;
+        /** Non visibile solo per il meteo: per altezza si vedrebbe (faccina arancione). */
+        public final boolean weatherBlocked;
+        /** Motivo meteo ("pioggia fino a 85%, nubi fino a 100%") quando {@link #weatherBlocked}. */
+        public final String reason;
 
         Rank(String name, String typeCode, double raDeg, double decDeg, int best, int score,
-             int bestMinutes, double maxAlt, String bestRanges) {
+             int bestMinutes, double maxAlt, String bestRanges, boolean weatherBlocked, String reason) {
             this.name = name;
             this.typeCode = typeCode;
             this.raDeg = raDeg;
@@ -181,11 +240,14 @@ public final class NightSky {
             this.bestMinutes = bestMinutes;
             this.maxAlt = maxAlt;
             this.bestRanges = bestRanges;
+            this.weatherBlocked = weatherBlocked;
+            this.reason = reason;
         }
 
         /** "NGC 6888 · ottima 2h15 · max 87°" */
         public String headline() {
-            String grade = best == NOT_VISIBLE ? "non visibile" : grade(best) + " " + duration(bestMinutes);
+            String grade = best != NOT_VISIBLE ? grade(best) + " " + duration(bestMinutes)
+                    : weatherBlocked ? "non visibile per il meteo" : "non visibile, troppo basso";
             return String.format(Locale.ITALY, "%s · %s · max %.0f°", name, grade, maxAlt);
         }
     }
@@ -246,16 +308,18 @@ public final class NightSky {
         ZonedDateTime end = start.plusDays(1);
         List<ZonedDateTime> dark = new ArrayList<>();
         List<Integer> sky = new ArrayList<>();
+        List<int[]> rawSky = new ArrayList<>();
         boolean weatherSeen = false;
         for (ZonedDateTime cursor = start; cursor.isBefore(end); cursor = cursor.plusMinutes(STEP_MIN)) {
             long utc = cursor.toInstant().toEpochMilli();
             double[] sun = sunRaDec(utc);
             if (SkyCatalog.altAz(latDeg, lonDeg, sun[0], sun[1], utc)[0] >= -6) continue;
-            Integer v = weather == null ? null
-                    : weather.get(cursor.toLocalDateTime().truncatedTo(ChronoUnit.HOURS));
+            LocalDateTime hour = cursor.toLocalDateTime().truncatedTo(ChronoUnit.HOURS);
+            Integer v = weather == null ? null : weather.get(hour);
             if (v != null) weatherSeen = true;
             dark.add(cursor);
             sky.add(v == null ? GREAT : v);
+            rawSky.add(w == null || w.raw == null ? null : w.raw.get(hour));
         }
         String nightLine = dark.isEmpty()
                 ? "Il cielo non diventa abbastanza buio."
@@ -269,7 +333,7 @@ public final class NightSky {
                 long utc = dark.get(i).toInstant().toEpochMilli();
                 double alt = SkyCatalog.altAz(latDeg, lonDeg, item.raDeg, item.decDeg, utc)[0];
                 if (alt > maxAlt) maxAlt = alt;
-                slots.add(new Slot(dark.get(i), sky.get(i), altitudeLevel(alt)));
+                slots.add(new Slot(dark.get(i), sky.get(i), altitudeLevel(alt), rawSky.get(i)));
             }
             int[] minutes = new int[4];
             for (Slot s : slots) minutes[s.level()] += STEP_MIN;
@@ -283,11 +347,15 @@ public final class NightSky {
             final int wanted = best;
             String ranges = best == NOT_VISIBLE ? "" : ranges(slots, s -> s.level() == wanted);
             int score = minutes[GREAT] * 3 + minutes[GOOD] * 2 + minutes[POOR];
+            boolean blocked = best == NOT_VISIBLE && highEnough(slots);
+            String reason = blocked
+                    ? weatherCause(slots, s -> s.level() == NOT_VISIBLE && s.high > NOT_VISIBLE) : "";
             rows.add(new Rank(item.name, item.typeCode, item.raDeg, item.decDeg, best, score,
-                    best == NOT_VISIBLE ? 0 : minutes[best], maxAlt, ranges));
+                    best == NOT_VISIBLE ? 0 : minutes[best], maxAlt, ranges, blocked, reason));
         }
         Collections.sort(rows, (a, b) -> {
             if (a.best != b.best) return b.best - a.best;
+            if (a.weatherBlocked != b.weatherBlocked) return a.weatherBlocked ? -1 : 1;
             if (a.score != b.score) return b.score - a.score;
             return Double.compare(b.maxAlt, a.maxAlt);
         });
@@ -1046,11 +1114,16 @@ public final class NightSky {
         final ZonedDateTime when;
         final int sky;
         final int high;
+        /** Nubi % e probabilità di pioggia % dell'ora; -1 se il meteo non c'è. */
+        final int cloud;
+        final int pop;
 
-        Slot(ZonedDateTime when, int sky, int high) {
+        Slot(ZonedDateTime when, int sky, int high, int[] raw) {
             this.when = when;
             this.sky = sky;
             this.high = high;
+            this.cloud = raw == null ? -1 : raw[0];
+            this.pop = raw == null ? -1 : raw[1];
         }
 
         int level() {

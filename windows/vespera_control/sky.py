@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import threading
 import time
 import unicodedata
 import urllib.parse
@@ -16,6 +17,9 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 TIMEOUT = 20
+SESAME_TIMEOUT = 30  # SESAME passa da solo al mirror di SIMBAD quando Strasburgo è lento
+LIST_TIMEOUT = 12    # oltre, le liste di SIMBAD si saltano e resta il nome esatto
+SIZE_TIMEOUT = 8     # la dimensione serve solo per il campo della foto
 MAX_BYTES = 2_500_000
 SESAME_HOST = "cds.unistra.fr"
 SIMBAD_HOST = "simbad.cds.unistra.fr"
@@ -31,7 +35,8 @@ class SkyError(Exception):
 
 # --------------------------------------------------------------------------- HTTP
 
-def _get(host: str, path: str, accept: str = "application/json,text/*,*/*") -> tuple[int, bytes]:
+def _get(host: str, path: str, accept: str = "application/json,text/*,*/*",
+         timeout: float = TIMEOUT) -> tuple[int, bytes]:
     if not path.startswith("/"):
         path = "/" + path
     req = urllib.request.Request(
@@ -39,7 +44,7 @@ def _get(host: str, path: str, accept: str = "application/json,text/*,*/*") -> t
         headers={"Accept": accept, "User-Agent": "VesperaControl/1.0"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = resp.read(MAX_BYTES + 1)
             code = resp.status
     except urllib.error.HTTPError as exc:
@@ -49,8 +54,8 @@ def _get(host: str, path: str, accept: str = "application/json,text/*,*/*") -> t
     return code, data
 
 
-def _get_text(host: str, path: str) -> tuple[int, str]:
-    code, data = _get(host, path)
+def _get_text(host: str, path: str, timeout: float = TIMEOUT) -> tuple[int, str]:
+    code, data = _get(host, path, timeout=timeout)
     return code, data.decode("utf-8", errors="replace")
 
 
@@ -265,27 +270,37 @@ def prefer_dso(query: str, hit: Hit, aliases: list[str]) -> Hit:
 
 
 def sesame_hit(query: str) -> Hit | None:
+    """None se il nome non esiste o il servizio non risponde."""
+    try:
+        return _sesame(query)
+    except Exception:
+        return None
+
+
+def _sesame(query: str) -> Hit | None:
+    """Come sesame_hit ma distingue: None = nome inesistente, eccezione = servizio non raggiunto."""
     name = (query or "").strip()[:80]
     if not name:
         return None
-    try:
-        code, xml = _get_text(SESAME_HOST, "/cgi-bin/nph-sesame/-oxI/S?" + urllib.parse.quote(name))
-        if code < 200 or code >= 300:
-            return None
-        at = xml.find("<Resolver")
-        if at < 0:
-            return None
-        part = xml[at:]
-        ra, dec = _tag(part, "jradeg"), _tag(part, "jdedeg")
-        if not ra or not dec:
-            return None
-        ra_d, dec_d = float(ra), float(dec)
-        if not (0 <= ra_d < 360 and -90 <= dec_d <= 90):
-            return None
-        aliases = [a.strip() for a in re.findall(r"<alias>(.*?)</alias>", part, re.S)]
-        return prefer_dso(name, Hit(clean_id(_tag(part, "oname") or name), _tag(part, "otype"), ra_d, dec_d), aliases)
-    except Exception:
+    code, xml = _get_text(SESAME_HOST, "/cgi-bin/nph-sesame/-oxI/S?" + urllib.parse.quote(name),
+                          SESAME_TIMEOUT)
+    if code < 200 or code >= 300:
+        raise SkyError("net")
+    at = xml.find("<Resolver")
+    if at < 0:
         return None
+    part = xml[at:]
+    ra, dec = _tag(part, "jradeg"), _tag(part, "jdedeg")
+    if not ra or not dec:
+        return None
+    try:
+        ra_d, dec_d = float(ra), float(dec)
+    except ValueError:
+        return None
+    if not (0 <= ra_d < 360 and -90 <= dec_d <= 90):
+        return None
+    aliases = [a.strip() for a in re.findall(r"<alias>(.*?)</alias>", part, re.S)]
+    return prefer_dso(name, Hit(clean_id(_tag(part, "oname") or name), _tag(part, "otype"), ra_d, dec_d), aliases)
 
 
 _CATALOG = re.compile(r"(?i)^(m|ngc|ic|ugc|pgc)\s*(\d+)\s*$")
@@ -300,7 +315,7 @@ def _tap_like(prefix: str) -> list[Hit]:
     )
     path = ("/simbad/sim-tap/sync?REQUEST=doQuery&LANG=ADQL&FORMAT=json&MAXREC=20&QUERY="
             + urllib.parse.quote(sql))
-    code, body = _get_text(SIMBAD_HOST, path)
+    code, body = _get_text(SIMBAD_HOST, path, LIST_TIMEOUT)
     if code < 200 or code >= 300:
         raise SkyError("net")
     out: dict[str, Hit] = {}
@@ -336,7 +351,8 @@ def _wildcard(word: str) -> list[Hit]:
         "set limit 18\n"
         f"query id wildcard NAME {safe}*\n"
     )
-    code, body = _get_text(SIMBAD_HOST, "/simbad/sim-script?script=" + urllib.parse.quote(script))
+    code, body = _get_text(SIMBAD_HOST, "/simbad/sim-script?script=" + urllib.parse.quote(script),
+                           LIST_TIMEOUT)
     if code < 200 or code >= 300:
         raise SkyError("net")
     out: list[Hit] = []
@@ -376,14 +392,33 @@ def find(query: str) -> list[Hit]:
                 return [hit]
         m = _CATALOG.match(name)
         if m:
+            # SIMBAD (lista per prefisso) e SESAME (sigla esatta) partono insieme:
+            # se SIMBAD è lento o non risponde resta la sigla esatta di SESAME.
             tag = m.group(1).upper()
-            hits = _tap_like(f"{tag}  {m.group(2)}") or _tap_like(f"{tag} {m.group(2)}")
-            if hits:
-                return hits
-            hit = sesame_hit(name)
-            if hit:
+            exact_hit: list = []
+
+            def ask_sesame() -> None:
+                try:
+                    exact_hit.append(_sesame(name))
+                except Exception as exc:
+                    exact_hit.append(exc)
+
+            worker = threading.Thread(target=ask_sesame, daemon=True)
+            worker.start()
+            unreachable = False
+            try:
+                hits = _tap_like(f"{tag}  {m.group(2)}") or _tap_like(f"{tag} {m.group(2)}")
+                if hits:
+                    return hits
+            except Exception:
+                unreachable = True
+            worker.join(SESAME_TIMEOUT + 5)
+            hit = exact_hit[0] if exact_hit else None
+            if isinstance(hit, Hit):
                 return [hit]
-            raise SkyError("not_found")
+            if hit is not None or not exact_hit:
+                unreachable = True
+            raise SkyError("net" if unreachable else "not_found")
         word = stem(name)
         if len(word) < 3:
             raise SkyError("short")
@@ -400,10 +435,14 @@ def find(query: str) -> list[Hit]:
         add(sesame_hit(name))
         for alias in alias_targets_starting_with(word):
             add(sesame_hit(alias))
-        for hit in _wildcard(word):
-            add(hit)
+        unreachable = False
+        try:
+            for hit in _wildcard(word):
+                add(hit)
+        except Exception:
+            unreachable = True  # SIMBAD lento: restano i nomi trovati da SESAME
         if not merged:
-            raise SkyError("not_found")
+            raise SkyError("net" if unreachable else "not_found")
         return list(merged.values())[:LIMIT]
     except SkyError:
         raise
@@ -416,7 +455,8 @@ def _angular_size_arcmin(name: str) -> float:
         return 0.0
     try:
         code, text = _get_text(
-            SIMBAD_HOST, "/simbad/sim-id?Ident=" + urllib.parse.quote(name) + "&output.format=ASCII")
+            SIMBAD_HOST, "/simbad/sim-id?Ident=" + urllib.parse.quote(name) + "&output.format=ASCII",
+            SIZE_TIMEOUT)
         if code < 200 or code >= 300:
             return 0.0
         at = text.find("Angular size:")
@@ -644,6 +684,9 @@ def site_from_internet() -> tuple[float, float]:
 # --------------------------------------------------------------------------- visibilità
 
 NONE, NOT_VISIBLE, POOR, GOOD, GREAT = -1, 0, 1, 2, 3
+# Solo per faccina/colore: non visibile per il meteo (arancione, è una previsione);
+# NOT_VISIBLE resta il rosso dell'oggetto troppo basso (certo).
+WEATHER_BLOCK = 4
 STEP_MIN = 15
 HEADLINE_MIN = 30
 
@@ -758,12 +801,13 @@ def report(lat: float, lon: float, object_name: str | None = None,
     Il livello di ogni quarto d'ora è il peggiore tra meteo e altezza oggetto."""
     has_object = object_name is not None
     weather = _weather_cached(lat, lon)
+    raw = _WEATHER_RAW.get((round(lat, 2), round(lon, 2)), {}) if weather is not None else {}
 
     now = datetime.now()
     start = now.replace(hour=12, minute=0, second=0, microsecond=0)
     if now < start:
         start -= timedelta(days=1)
-    slots: list[tuple[datetime, int, int]] = []
+    slots: list[tuple] = []  # (ora, livello meteo, livello altezza, (nubi %, pioggia %) o None)
     max_alt = -90.0
     for _attempt in range(2):
         slots, max_alt = [], -90.0
@@ -773,14 +817,15 @@ def report(lat: float, lon: float, object_name: str | None = None,
             sra, sdec = sun_ra_dec(utc)
             if alt_az(lat, lon, sra, sdec, utc)[0] < -6:
                 sky = GREAT
+                hour = cursor.strftime("%Y-%m-%dT%H")
                 if weather is not None:
-                    sky = weather.get(cursor.strftime("%Y-%m-%dT%H"), GREAT)
+                    sky = weather.get(hour, GREAT)
                 high = GREAT
                 if has_object:
                     alt = alt_az(lat, lon, ra, dec, utc)[0]
                     max_alt = max(max_alt, alt)
                     high = _altitude_level(alt)
-                slots.append((cursor, sky, high))
+                slots.append((cursor, sky, high, raw.get(hour)))
             cursor += timedelta(minutes=STEP_MIN)
         # Notte già finita (mattina): mostra la prossima.
         if slots and slots[-1][0] + timedelta(minutes=STEP_MIN) <= datetime.now():
@@ -808,10 +853,15 @@ def report(lat: float, lon: float, object_name: str | None = None,
     who = "Cielo"
     if has_object:
         who = re.sub(r"\s+", " ", object_name.strip()) or "Oggetto"
-    head = f"{who} stanotte: " + ("non visibile" if best == NOT_VISIBLE else "al meglio " + GRADES[best])
+    # Non visibile: per il meteo (arancione) se per altezza si vedrebbe, altrimenti troppo basso (rosso)
+    blocked = best == NOT_VISIBLE and _high_enough(slots)
+    if best != NOT_VISIBLE:
+        head = f"{who} stanotte: al meglio {GRADES[best]}"
+    else:
+        head = f"{who} stanotte: " + ("non visibile per il meteo" if blocked else "non visibile, troppo basso")
     if has_object and max_alt > -90:
         head += f" · max {max_alt:.0f}°"
-    lines.append((best, head))
+    lines.append((WEATHER_BLOCK if blocked else best, head))
     if has_object:
         # Tempo utile (buona o ottima) in tutta la notte e da adesso
         now = datetime.now()
@@ -820,27 +870,69 @@ def report(lat: float, lon: float, object_name: str | None = None,
         from_now = sum(STEP_MIN for s in good if s[0] + timedelta(minutes=STEP_MIN) > now)
         lines.append((NONE, f"Tempo di osservazione utile: {_duration(usable)} stanotte · "
                             f"{_duration(from_now)} da adesso"))
-    for lv in (GREAT, GOOD, POOR, NOT_VISIBLE):
-        r = _ranges(slots, lambda s, lv=lv: level(s) == lv)
-        if r:
-            lines.append((lv, f"{LABELS[lv]}  {r}"))
+    for lv in (GREAT, GOOD, POOR):
+        def test(s, lv=lv):
+            return level(s) == lv
+        r = _ranges(slots, test)
+        if not r:
+            continue
+        # Solo cielo: la scarsa dipende sempre dal meteo, si dice subito perché
+        why = _weather_cause(slots, test) if not has_object and lv == POOR else ""
+        lines.append((lv, f"{LABELS[lv]}  {r}" + (f" · {why}" if why else "")))
+
+    # Non visibile, due righe: meteo (arancione, è una previsione) e oggetto basso (rosso, è certo)
+    def cloudy(s):
+        return level(s) == NOT_VISIBLE and s[2] > NOT_VISIBLE
+
+    r = _ranges(slots, cloudy)
+    if r:
+        why = _weather_cause(slots, cloudy)
+        lines.append((WEATHER_BLOCK, f"Non visibile per il meteo  {r}" + (f" · {why}" if why else "")))
+    r = _ranges(slots, lambda s: s[2] == NOT_VISIBLE)
+    if r:
+        lines.append((NOT_VISIBLE, f"Non visibile  {r} · oggetto sotto 15°"))
+
     if weather is None:
         lines.append((NONE, "Meteo non raggiungibile: conta solo l'altezza dell'oggetto."))
     elif has_object:
-        clouds = _ranges(slots, lambda s: s[1] < GOOD and s[1] <= s[2])
+        def by_clouds(s):
+            return s[1] < GOOD and s[1] <= s[2]
+
+        clouds = _ranges(slots, by_clouds)
         low = _ranges(slots, lambda s: s[2] < GOOD and s[2] <= s[1])
         if clouds or low:
             lines.append((NONE, "Perché:"))
         if clouds:
-            lines.append((NONE, f"  nuvole/pioggia  {clouds}"))
+            why = _weather_cause(slots, by_clouds)
+            lines.append((NONE, f"  nuvole/pioggia  {clouds}" + (f" · {why}" if why else "")))
         if low:
-            lines.append((NONE, f"  oggetto basso  {low}"))
+            lines.append((NONE, f"  oggetto basso (sotto 30°)  {low}"))
     return lines
+
+
+def _high_enough(slots) -> bool:
+    """Vero se, contando solo l'altezza, l'oggetto si vedrebbe per almeno 30 minuti (≥ 15°)."""
+    return sum(STEP_MIN for s in slots if s[2] > NOT_VISIBLE) >= HEADLINE_MIN
+
+
+def _weather_cause(slots, test) -> str:
+    """'pioggia fino a 85%, nubi fino a 100%' sui quarti d'ora scelti; vuoto se non c'è il dato."""
+    cloud = pop = -1
+    for s in slots:
+        if test(s) and s[3] is not None:
+            cloud, pop = max(cloud, s[3][0]), max(pop, s[3][1])
+    parts = []
+    if pop >= 30:
+        parts.append(f"pioggia fino a {pop}%")
+    if cloud >= 50:
+        parts.append(f"nubi fino a {cloud}%")
+    return ", ".join(parts)
 
 
 GRADES = {GREAT: "ottima", GOOD: "buona", POOR: "scarsa", NOT_VISIBLE: "non visibile"}
 LABELS = {GREAT: "Ottima", GOOD: "Buona", POOR: "Scarsa", NOT_VISIBLE: "Non visibile"}
-COLORS = {GREAT: "#1E88E5", GOOD: "#43A047", POOR: "#FDD835", NOT_VISIBLE: "#E53935"}
+COLORS = {GREAT: "#1E88E5", GOOD: "#43A047", POOR: "#FDD835", NOT_VISIBLE: "#E53935",
+          WEATHER_BLOCK: "#FB8C00"}
 
 
 def _ranges(slots, test) -> str:
@@ -899,10 +991,20 @@ class Rank:
     best_minutes: int
     max_alt: float
     best_ranges: str
+    weather_blocked: bool = False  # non visibile solo per il meteo: per altezza si vedrebbe
+    reason: str = ""               # motivo meteo quando weather_blocked
+
+    @property
+    def face(self) -> int:
+        """Livello per faccina/colore: arancione se è solo il meteo a nasconderlo."""
+        return WEATHER_BLOCK if self.weather_blocked else self.best
 
     def headline(self) -> str:
         """'NGC 6888 · ottima 2h15 · max 87°'"""
-        grade = "non visibile" if self.best == NOT_VISIBLE else f"{GRADES[self.best]} {_duration(self.best_minutes)}"
+        if self.best != NOT_VISIBLE:
+            grade = f"{GRADES[self.best]} {_duration(self.best_minutes)}"
+        else:
+            grade = "non visibile per il meteo" if self.weather_blocked else "non visibile, troppo basso"
         return f"{self.name} · {grade} · max {self.max_alt:.0f}°"
 
 
@@ -931,18 +1033,20 @@ def rank(lat: float, lon: float, items: list[dict], night: date) -> tuple[str, b
     Oltre i 16 giorni del meteo conta solo l'altezza. Come NightSky.rank dell'APK.
     Ritorna (riga notte, meteo presente, righe)."""
     weather = _weather_cached(lat, lon)
+    raw = _WEATHER_RAW.get((round(lat, 2), round(lon, 2)), {}) if weather is not None else {}
     start = datetime(night.year, night.month, night.day, 12, 0)
-    dark: list[tuple[datetime, datetime, int]] = []
+    dark: list[tuple] = []  # (ora locale, UTC, livello meteo, (nubi %, pioggia %) o None)
     seen = False
     cursor = start
     while cursor < start + timedelta(days=1):
         utc = datetime.fromtimestamp(cursor.timestamp(), _UTC)
         sra, sdec = sun_ra_dec(utc)
         if alt_az(lat, lon, sra, sdec, utc)[0] < -6:
-            v = weather.get(cursor.strftime("%Y-%m-%dT%H")) if weather is not None else None
+            hour = cursor.strftime("%Y-%m-%dT%H")
+            v = weather.get(hour) if weather is not None else None
             if v is not None:
                 seen = True
-            dark.append((cursor, utc, GREAT if v is None else v))
+            dark.append((cursor, utc, GREAT if v is None else v, raw.get(hour)))
         cursor += timedelta(minutes=STEP_MIN)
     if dark:
         night_line = f"Notte {dark[0][0]:%H:%M}–{dark[-1][0] + timedelta(minutes=STEP_MIN):%H:%M}"
@@ -956,10 +1060,10 @@ def rank(lat: float, lon: float, items: list[dict], night: date) -> tuple[str, b
             continue
         slots = []
         max_alt = -90.0
-        for local, utc, sky_lv in dark:
+        for local, utc, sky_lv, sky_raw in dark:
             alt = alt_az(lat, lon, ra, dec, utc)[0]
             max_alt = max(max_alt, alt)
-            slots.append((local, sky_lv, _altitude_level(alt)))
+            slots.append((local, sky_lv, _altitude_level(alt), sky_raw))
         minutes = [0, 0, 0, 0]
         for s in slots:
             minutes[min(s[1], s[2])] += STEP_MIN
@@ -969,11 +1073,15 @@ def rank(lat: float, lon: float, items: list[dict], night: date) -> tuple[str, b
                 best = lv
                 break
         ranges = "" if best == NOT_VISIBLE else _ranges(slots, lambda s, b=best: min(s[1], s[2]) == b)
+        blocked = best == NOT_VISIBLE and _high_enough(slots)
+        reason = _weather_cause(
+            slots, lambda s: min(s[1], s[2]) == NOT_VISIBLE and s[2] > NOT_VISIBLE) if blocked else ""
         rows.append(Rank(
             str(item.get("name") or ""), str(item.get("type") or ""), ra, dec, best,
             minutes[GREAT] * 3 + minutes[GOOD] * 2 + minutes[POOR],
-            0 if best == NOT_VISIBLE else minutes[best], max_alt, ranges))
-    rows.sort(key=lambda r: (-r.best, -r.score, -r.max_alt))
+            0 if best == NOT_VISIBLE else minutes[best], max_alt, ranges, blocked, reason))
+    # a parità (non visibili): prima quelli fermati solo dal meteo
+    rows.sort(key=lambda r: (-r.best, not r.weather_blocked, -r.score, -r.max_alt))
     return night_line, seen, rows
 
 

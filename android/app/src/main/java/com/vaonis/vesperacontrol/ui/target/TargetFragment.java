@@ -509,14 +509,16 @@ public class TargetFragment extends Fragment implements TabRefreshable {
         });
     }
 
-    /** Righe del rapporto con faccina colorata: blu ottima, verde buona, giallo scarsa, rosso non visibile. */
+    /** Righe del rapporto con faccina colorata: blu ottima, verde buona, giallo scarsa,
+     * arancione non visibile per il meteo, rosso non visibile perché troppo basso. */
     private CharSequence visibilityText(String where, List<NightSky.Line> lines) {
         SpannableStringBuilder sb = new SpannableStringBuilder(where);
         int size = Math.round(textVisibility.getTextSize() * 1.2f);
         for (NightSky.Line line : lines) {
             sb.append('\n');
             if (line.level >= 0) {
-                Drawable icon = ContextCompat.getDrawable(requireContext(), visibilityIcon(line.level));
+                Drawable icon = ContextCompat.getDrawable(requireContext(),
+                        visibilityIcon(line.level, line.weather));
                 if (icon != null) {
                     icon = icon.mutate();
                     icon.setBounds(0, 0, size, size);
@@ -533,10 +535,15 @@ public class TargetFragment extends Fragment implements TabRefreshable {
     }
 
     private static int visibilityIcon(int level) {
+        return visibilityIcon(level, false);
+    }
+
+    /** {@code weather}: non visibile solo per nubi/pioggia → arancione; altrimenti rosso (troppo basso). */
+    private static int visibilityIcon(int level, boolean weather) {
         if (level >= NightSky.GREAT) return R.drawable.ic_vis_3;
         if (level == NightSky.GOOD) return R.drawable.ic_vis_2;
         if (level == NightSky.POOR) return R.drawable.ic_vis_1;
-        return R.drawable.ic_vis_0;
+        return weather ? R.drawable.ic_vis_0_weather : R.drawable.ic_vis_0;
     }
 
     private String siteLine(double lat, double lon) {
@@ -633,7 +640,8 @@ public class TargetFragment extends Fragment implements TabRefreshable {
             TextView row = new TextView(requireContext());
             SpannableStringBuilder sb = new SpannableStringBuilder();
             int size = Math.round(row.getTextSize() * 1.3f);
-            Drawable icon = ContextCompat.getDrawable(requireContext(), visibilityIcon(rank.best));
+            Drawable icon = ContextCompat.getDrawable(requireContext(),
+                    visibilityIcon(rank.best, rank.weatherBlocked));
             if (icon != null) {
                 icon = icon.mutate();
                 icon.setBounds(0, 0, size, size);
@@ -644,11 +652,13 @@ public class TargetFragment extends Fragment implements TabRefreshable {
             }
             sb.append(String.valueOf(position++)).append(". ").append(rank.headline());
             String type = SkyCatalog.typeLabel(rank.typeCode);
-            if (!rank.bestRanges.isEmpty() || !type.isEmpty()) {
+            // sotto: tipo, poi le ore migliori oppure il motivo meteo se è il meteo a nasconderlo
+            String detail = rank.bestRanges.isEmpty() ? rank.reason : rank.bestRanges;
+            if (!detail.isEmpty() || !type.isEmpty()) {
                 sb.append("\n      ");
                 if (!type.isEmpty()) sb.append(type);
-                if (!type.isEmpty() && !rank.bestRanges.isEmpty()) sb.append(" · ");
-                sb.append(rank.bestRanges);
+                if (!type.isEmpty() && !detail.isEmpty()) sb.append(" · ");
+                sb.append(detail);
             }
             row.setText(sb);
             row.setTextColor(getResources().getColor(R.color.vespera_text, null));

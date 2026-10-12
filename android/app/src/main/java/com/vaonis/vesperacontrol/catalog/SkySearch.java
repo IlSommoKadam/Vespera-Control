@@ -10,6 +10,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -25,6 +28,9 @@ public final class SkySearch {
     private static final Pattern COORD = Pattern.compile(
             "([+-]?\\d+(?:\\.\\d+)?)\\s+([+-]?\\d+(?:\\.\\d+)?)");
     private static final int LIMIT = 12;
+    /** Oltre questo tempo le liste di SIMBAD si saltano e resta il nome esatto. */
+    private static final int LIST_TIMEOUT_MS = 12_000;
+    private static final ExecutorService POOL = Executors.newCachedThreadPool();
 
     private SkySearch() {
     }
@@ -46,15 +52,32 @@ public final class SkySearch {
 
         Matcher catalog = CATALOG.matcher(name);
         if (catalog.matches()) {
-            List<SkyCatalog.Hit> hits = catalogPrefix(catalog.group(1), catalog.group(2));
-            if (!hits.isEmpty()) return hits;
-            SkyCatalog.Hit hit = SkyCatalog.sesameHit(name);
+            // SIMBAD (lista per prefisso) e SESAME (sigla esatta) partono insieme:
+            // se SIMBAD è lento o non risponde resta la sigla esatta di SESAME.
+            final String sigla = name;
+            Future<SkyCatalog.Hit> exactHit = POOL.submit(() -> SkyCatalog.sesame(sigla));
+            boolean unreachable = false;
+            try {
+                List<SkyCatalog.Hit> hits = catalogPrefix(catalog.group(1), catalog.group(2));
+                if (!hits.isEmpty()) {
+                    exactHit.cancel(true);
+                    return hits;
+                }
+            } catch (Exception slow) {
+                unreachable = true;
+            }
+            SkyCatalog.Hit hit = null;
+            try {
+                hit = exactHit.get();
+            } catch (Exception slow) {
+                unreachable = true;
+            }
             if (hit != null) {
                 List<SkyCatalog.Hit> one = new ArrayList<>();
                 one.add(hit);
                 return one;
             }
-            throw new Exception("not_found");
+            throw new Exception(unreachable ? "net" : "not_found");
         }
 
         String stem = SkyNames.stem(name);
@@ -66,10 +89,15 @@ public final class SkySearch {
         for (String alias : SkyNames.aliasTargetsStartingWith(stem)) {
             add(merged, SkyCatalog.sesameHit(alias));
         }
-        for (SkyCatalog.Hit hit : wildcard(stem)) {
-            add(merged, hit);
+        boolean unreachable = false;
+        try {
+            for (SkyCatalog.Hit hit : wildcard(stem)) {
+                add(merged, hit);
+            }
+        } catch (Exception slow) {
+            unreachable = true; // SIMBAD lento: restano i nomi trovati da SESAME
         }
-        if (merged.isEmpty()) throw new Exception("not_found");
+        if (merged.isEmpty()) throw new Exception(unreachable ? "net" : "not_found");
         List<SkyCatalog.Hit> out = new ArrayList<>(merged.values());
         if (out.size() > LIMIT) return out.subList(0, LIMIT);
         return out;
@@ -95,7 +123,7 @@ public final class SkySearch {
                 + "WHERE ident.id LIKE '" + prefix.replace("'", "") + "%'";
         String path = "/simbad/sim-tap/sync?REQUEST=doQuery&LANG=ADQL&FORMAT=json&MAXREC=20&QUERY="
                 + URLEncoder.encode(sql, StandardCharsets.UTF_8.name());
-        HttpsFetch.Result page = HttpsFetch.get("simbad.cds.unistra.fr", path);
+        HttpsFetch.Result page = HttpsFetch.get("simbad.cds.unistra.fr", path, LIST_TIMEOUT_MS);
         if (page.code < 200 || page.code >= 300) throw new Exception("HTTP " + page.code);
         return parseTap(page.body);
     }
@@ -141,7 +169,7 @@ public final class SkySearch {
                 + "query id wildcard NAME " + safe + "*\n";
         String path = "/simbad/sim-script?script="
                 + URLEncoder.encode(script, StandardCharsets.UTF_8.name());
-        HttpsFetch.Result page = HttpsFetch.get("simbad.cds.unistra.fr", path);
+        HttpsFetch.Result page = HttpsFetch.get("simbad.cds.unistra.fr", path, LIST_TIMEOUT_MS);
         if (page.code < 200 || page.code >= 300) throw new Exception("HTTP " + page.code);
         return parseScript(page.body);
     }

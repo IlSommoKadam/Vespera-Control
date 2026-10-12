@@ -192,7 +192,7 @@
     <string name="telescope_visibility_need_site">Posizione non impostata. In Impostazioni usa il GPS, scrivi le coordinate, oppure collegati al Vespera.</string>
     <string name="telescope_visibility_loading">Visibilità della notte…</string>
     <string name="telescope_visibility_fail">Meteo non raggiungibile. L\'altezza dell\'oggetto, se c\'è, resta sotto.</string>
-    <string name="telescope_observe_net">Catalogo non raggiungibile. Serve Internet sul telefono.</string>
+    <string name="telescope_observe_net">Il catalogo (SIMBAD) non risponde: a volte è lento, riprova tra poco. Se manca anche il meteo, controlla Internet sul telefono.</string>
     <string name="telescope_observe_preview_fail">Coordinate pronte. L\'anteprima del campo non è arrivata.</string>
     <string name="telescope_observe_pointing">%1$s\n%2$s\nRA %3$s   ·   Dec %4$s\nRA %5$.3f°   ·   Dec %6$.3f°</string>
     <string name="telescope_observe_store">Multi-notte già sul telescopio: %1$d pose (%2$s). Avvia ne apre una nuova, Continua aggiunge pose a questa.</string>

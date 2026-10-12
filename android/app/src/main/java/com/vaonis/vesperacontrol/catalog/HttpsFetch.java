@@ -28,11 +28,16 @@ public final class HttpsFetch {
     }
 
     public static Result get(String host, String pathAndQuery) throws Exception {
-        return get(host, pathAndQuery, "application/json,text/*,*/*");
+        return get(host, pathAndQuery, "application/json,text/*,*/*", TIMEOUT_MS);
+    }
+
+    /** Come {@link #get(String, String)} ma con un tempo massimo scelto (servizi a volte lenti). */
+    public static Result get(String host, String pathAndQuery, int timeoutMs) throws Exception {
+        return get(host, pathAndQuery, "application/json,text/*,*/*", timeoutMs);
     }
 
     public static byte[] getBytes(String host, String pathAndQuery) throws Exception {
-        Result result = get(host, pathAndQuery, "image/jpeg,image/*,*/*");
+        Result result = get(host, pathAndQuery, "image/jpeg,image/*,*/*", TIMEOUT_MS);
         if (result.code < 200 || result.code >= 300 || result.bytes.length == 0) {
             throw new Exception("HTTP " + result.code);
         }
@@ -42,7 +47,8 @@ public final class HttpsFetch {
         return result.bytes;
     }
 
-    private static Result get(String host, String pathAndQuery, String accept) throws Exception {
+    private static Result get(String host, String pathAndQuery, String accept, int timeoutMs)
+            throws Exception {
         String path = pathAndQuery == null ? "/" : pathAndQuery;
         if (!path.startsWith("/")) {
             path = "/" + path;
@@ -50,8 +56,8 @@ public final class HttpsFetch {
         URL url = new URL("https://" + host + path);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         try {
-            conn.setConnectTimeout(TIMEOUT_MS);
-            conn.setReadTimeout(TIMEOUT_MS);
+            conn.setConnectTimeout(timeoutMs);
+            conn.setReadTimeout(timeoutMs);
             conn.setInstanceFollowRedirects(true);
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Accept", accept);

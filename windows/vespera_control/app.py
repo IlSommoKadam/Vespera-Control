@@ -1219,7 +1219,8 @@ class App(tk.Tk):
         elif code in ("not_found", "empty"):
             msg = "Oggetto non trovato. Prova la sigla (M42) o il nome in italiano o inglese."
         else:
-            msg = "Catalogo non raggiungibile. Serve Internet sul PC."
+            msg = ("Il catalogo (SIMBAD) non risponde: a volte è lento, riprova tra poco. "
+                   "Se manca anche il meteo, controlla Internet sul PC.")
         self.obs_result.set(msg)
 
     def _show_obs_session(self) -> None:
@@ -1512,14 +1513,15 @@ class App(tk.Tk):
             self._fav_widgets.append(check)
             text.window_create("end", window=check)
             if ImageTk is not None:
-                face = ImageTk.PhotoImage(sky.face_image(r.best, 18))
+                face = ImageTk.PhotoImage(sky.face_image(r.face, 18))
                 self._fav_faces.append(face)
                 text.image_create("end", image=face, padx=2)
                 text.insert("end", "  ", (tag,))
             else:
-                text.insert("end", "● ", (f"lv{r.best}", tag))
+                text.insert("end", "● ", (f"lv{r.face}", tag))
             kind = sky.type_label(r.type_code)
-            extra = " · ".join(x for x in (kind, r.best_ranges) if x)
+            # tipo, poi le ore migliori oppure il motivo meteo se è il meteo a nasconderlo
+            extra = " · ".join(x for x in (kind, r.best_ranges or r.reason) if x)
             text.insert("end", f"{i + 1}. {r.headline()}", (tag, "favhead"))
             if extra:
                 text.insert("end", f"   {extra}", (tag, "favsub"))
