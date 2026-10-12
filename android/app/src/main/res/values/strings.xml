@@ -131,6 +131,8 @@
     <string name="tg_ev_obs_started">Osservazione avviata</string>
     <string name="tg_ev_obs_stopped">Osservazione fermata</string>
     <string name="tg_ev_obs_finished">Osservazione terminata</string>
+    <string name="tg_ev_park">Park avviato / concluso</string>
+    <string name="tg_ev_reposition">Riposizionamento al Set</string>
     <string name="tg_ev_error">Errore</string>
     <string name="tg_ev_battery_low">Batteria scarica</string>
     <string name="tg_ev_battery_off_mains">Batteria senza rete</string>

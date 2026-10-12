@@ -59,6 +59,8 @@ Stato in `remote.state.json` → `cable`: `{turnsDeg, turns, auto, busy, activit
 
 `cmd|cable|set` (alias `zero`): con il cavo dritto, l'AZ attuale diventa il riferimento (`refAz`) e il conteggio riparte da 0. All'avvio di un'osservazione (OBS_STARTED/RESUMED) l'Helper salva AZ/ALT/cavo e li manda su Telegram. Alla fine (OBS_STOPPED/FINISHED), dopo 3 min e se nessun passo del piano parte entro 30 min, manda «inizio riposizionamento», ruota l'azimut di `−turnsDeg` (torna al Set) e manda lo stato finale: AZ, ALT, braccio, scarto dal Set, cavo srotolato o no. Di giorno a braccio chiuso fa lo stesso (una volta al giorno). `cmd|cable|auto|off` disattiva entrambi.
 
+Flag Telegram (Helper ≥ 0.8.51, in `set|telegram|{json}`): `reposition` accende i messaggi di riposizionamento al Set; `park` quelli di park avviato e concluso (braccio chiuso). `batteryOffMains` viene notificato anche alla connessione del Vespera, se è già a batteria.
+
 ### Piano della notte (Helper â‰¥ 0.8.23)
 
 `cmd|plan|load|{"title","night":"YYYY-MM-DD","parkAtEnd":true,"steps":[{"start":ms,"end":ms,"name","type","ra","dec","level"}]}`

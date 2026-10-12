@@ -84,6 +84,8 @@ TELEGRAM_FLAGS = [
     ("obsStarted", "Osservazione avviata"),
     ("obsStopped", "Osservazione fermata"),
     ("obsFinished", "Osservazione terminata"),
+    ("park", "Park avviato / concluso"),
+    ("reposition", "Riposizionamento al Set"),
     ("error", "Errore"),
     ("batteryLow", "Batteria scarica"),
     ("batteryOffMains", "Batteria senza rete"),
