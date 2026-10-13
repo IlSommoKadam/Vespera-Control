@@ -1592,7 +1592,7 @@ class App(tk.Tk):
             mins = round((int(periods[0]["end"]) - int(periods[0]["start"])) / 60000)
             off = sum(1 for p in periods if not p.get("enabled"))
             lines.append((-1, f"{len(periods)} periodi da {mins} min. Spunta i periodi da usare e scegli "
-                              f"l'oggetto (★ = proposto, il più alto)."
+                              f"l'oggetto (★ = proposto)."
                               + (f" {off} spenti: nuvoloso/pioggia o nessun oggetto alto." if off else "")))
             if not plan.get("steps"):
                 lines.append((-1, "Nessun periodo attivo con un oggetto: il piano è vuoto."))

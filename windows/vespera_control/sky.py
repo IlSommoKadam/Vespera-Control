@@ -1129,61 +1129,17 @@ def _period_score(a: list) -> float:
     return avg - 2.0 * max(0.0, 30.0 - low)
 
 
-def _hungarian(cost: list[list[float]]) -> list[int]:
-    """Assegnazione a costo minimo (righe ≤ colonne). Ritorna la colonna di ogni riga."""
-    n = len(cost)
-    m = len(cost[0]) if n else 0
-    INF = float("inf")
-    u = [0.0] * (n + 1)
-    v = [0.0] * (m + 1)
-    p = [0] * (m + 1)
-    way = [0] * (m + 1)
-    for i in range(1, n + 1):
-        p[0] = i
-        j0 = 0
-        minv = [INF] * (m + 1)
-        used = [False] * (m + 1)
-        while True:
-            used[j0] = True
-            i0 = p[j0]
-            delta = INF
-            j1 = 0
-            for j in range(1, m + 1):
-                if not used[j]:
-                    cur = cost[i0 - 1][j - 1] - u[i0] - v[j]
-                    if cur < minv[j]:
-                        minv[j] = cur
-                        way[j] = j0
-                    if minv[j] < delta:
-                        delta = minv[j]
-                        j1 = j
-            for j in range(m + 1):
-                if used[j]:
-                    u[p[j]] += delta
-                    v[j] -= delta
-                else:
-                    minv[j] -= delta
-            j0 = j1
-            if p[j0] == 0:
-                break
-        while True:
-            j1 = way[j0]
-            p[j0] = p[j1]
-            j0 = j1
-            if j0 == 0:
-                break
-    out = [-1] * n
-    for j in range(1, m + 1):
-        if p[j]:
-            out[p[j] - 1] = j - 1
-    return out
+PLAN_STATES_MAX = 5000
 
 
 def plan_propose(plan: dict) -> None:
-    """Proposta automatica: ogni oggetto visibile riceve lo stesso numero di periodi attivi
-    (±1), scegliendo per ciascuno i periodi dove è più alto; poi scambi che riducono i cambi
-    di oggetto senza perdere quota. I periodi spenti propongono l'oggetto migliore.
-    Scrive 'proposed' e 'choice' di ogni periodo. Come NightSky.propose dell'APK."""
+    """Proposta automatica sui periodi attivi, in ordine di importanza:
+    1. più ore possibili: ogni periodo attivo con almeno un oggetto alto ne riceve uno visibile;
+    2. più equa possibile: stesso numero di periodi per oggetto (minima somma dei quadrati);
+    3. ore consecutive: meno cambi di oggetto possibile;
+    4. a parità, ogni oggetto nei periodi dove è più alto.
+    I periodi spenti propongono l'oggetto migliore. Scrive 'proposed' e 'choice' di ogni
+    periodo. Come NightSky.propose dell'APK."""
     periods = plan.get("periods") or []
     m = len(plan.get("items") or [])
     if not periods or not m:
@@ -1197,49 +1153,32 @@ def plan_propose(plan: dict) -> None:
         return o if score[i][o] > -1000 else -1
 
     pick = {i: best_of(i) for i in range(len(periods))}
-    # i periodi senza nessun oggetto alto non contano: prenderebbero la quota di un oggetto
     active = [i for i, p in enumerate(periods) if p.get("enabled") and pick[i] >= 0]
-    visible = [o for o in range(m) if any(score[i][o] > -1000 for i in active)]
-    if active and visible:
-        e, v = len(active), len(visible)
-        # ogni oggetto e // v periodi; i periodi in più (e % v) vanno agli oggetti che rendono
-        # di più: si provano tutte le scelte (al massimo 300) e si tiene la migliore
-        from itertools import combinations, islice
-        best = None
-        for extra in islice(combinations(range(v), e % v), 300):
-            cols = [visible[k] for k in range(v) for _ in range(e // v + (1 if k in extra else 0))]
-            cost = [[-score[i][o] for o in cols] for i in active]
-            cols_of = _hungarian(cost)
-            total = sum(score[i][cols[cols_of[r]]] for r, i in enumerate(active))
-            if best is None or total > best[0] + 1e-9:
-                best = (total, [cols[c] for c in cols_of])
-        for r, i in enumerate(active):
-            o = best[1][r]
-            pick[i] = o if score[i][o] > -1000 else best_of(i)
+    if active:
+        def unfair(counts: tuple) -> int:
+            return sum(c * c for c in counts)
 
-        def switches() -> int:
-            seq = [pick[i] for i in active]
-            return sum(1 for a, b in zip(seq, seq[1:]) if a != b)
-
-        changed = True
-        while changed:
-            changed = False
-            for x in range(len(active)):
-                for y in range(x + 1, len(active)):
-                    i, j = active[x], active[y]
-                    a, b = pick[i], pick[j]
-                    if a == b or a < 0 or b < 0:
+        # stato (ultimo oggetto, periodi per oggetto) -> (cambi, -quota, scelte): per ogni stato
+        # basta la strada con meno cambi e più quota, l'equità si giudica alla fine
+        states = {(-1, (0,) * m): (0, 0.0, [])}
+        for i in active:
+            nxt: dict = {}
+            for (last, counts), (sw, neg, seq) in states.items():
+                for o in range(m):
+                    if score[i][o] <= -1000:
                         continue
-                    before = score[i][a] + score[j][b]
-                    after = score[i][b] + score[j][a]
-                    if after < before - 2.0 * 2 or min(score[i][b], score[j][a]) <= -1000:
-                        continue
-                    old = switches()
-                    pick[i], pick[j] = b, a
-                    if switches() < old:
-                        changed = True
-                    else:
-                        pick[i], pick[j] = a, b
+                    key = (o, counts[:o] + (counts[o] + 1,) + counts[o + 1:])
+                    val = (sw + (1 if last not in (-1, o) else 0), neg - score[i][o], seq + [o])
+                    old = nxt.get(key)
+                    if old is None or val[:2] < old[:2]:
+                        nxt[key] = val
+            if len(nxt) > PLAN_STATES_MAX:  # tanti oggetti: si tengono le strade migliori
+                keep = sorted(nxt.items(), key=lambda kv: (unfair(kv[0][1]), kv[1][0], kv[1][1]))
+                nxt = dict(keep[:PLAN_STATES_MAX])
+            states = nxt
+        best = min(states.items(), key=lambda kv: (unfair(kv[0][1]), kv[1][0], kv[1][1]))
+        for i, o in zip(active, best[1][2]):
+            pick[i] = o
     for i, p in enumerate(periods):
         p["proposed"] = p["choice"] = pick[i]
 

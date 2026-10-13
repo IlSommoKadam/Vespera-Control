@@ -411,75 +411,38 @@ public final class NightSky {
         return a[0] - 2.0 * Math.max(0, 30 - a[1]);
     }
 
-    /** Assegnazione a costo minimo (righe ≤ colonne): colonna di ogni riga. */
-    private static int[] hungarian(double[][] cost) {
-        int n = cost.length;
-        int m = n == 0 ? 0 : cost[0].length;
-        double[] u = new double[n + 1];
-        double[] v = new double[m + 1];
-        int[] p = new int[m + 1];
-        int[] way = new int[m + 1];
-        for (int i = 1; i <= n; i++) {
-            p[0] = i;
-            int j0 = 0;
-            double[] minv = new double[m + 1];
-            java.util.Arrays.fill(minv, Double.POSITIVE_INFINITY);
-            boolean[] used = new boolean[m + 1];
-            do {
-                used[j0] = true;
-                int i0 = p[j0];
-                double delta = Double.POSITIVE_INFINITY;
-                int j1 = 0;
-                for (int j = 1; j <= m; j++) {
-                    if (used[j]) continue;
-                    double cur = cost[i0 - 1][j - 1] - u[i0] - v[j];
-                    if (cur < minv[j]) {
-                        minv[j] = cur;
-                        way[j] = j0;
-                    }
-                    if (minv[j] < delta) {
-                        delta = minv[j];
-                        j1 = j;
-                    }
-                }
-                for (int j = 0; j <= m; j++) {
-                    if (used[j]) {
-                        u[p[j]] += delta;
-                        v[j] -= delta;
-                    } else {
-                        minv[j] -= delta;
-                    }
-                }
-                j0 = j1;
-            } while (p[j0] != 0);
-            do {
-                int j1 = way[j0];
-                p[j0] = p[j1];
-                j0 = j1;
-            } while (j0 != 0);
-        }
-        int[] out = new int[n];
-        java.util.Arrays.fill(out, -1);
-        for (int j = 1; j <= m; j++) if (p[j] != 0) out[p[j] - 1] = j - 1;
-        return out;
-    }
+    private static final int PLAN_STATES_MAX = 5000;
 
-    private static void combos(int v, int k, int from, List<Integer> cur, List<List<Integer>> out) {
-        if (out.size() >= 300) return;
-        if (cur.size() == k) {
-            out.add(new ArrayList<>(cur));
-            return;
+    /** Una strada della proposta: ultimo oggetto, periodi per oggetto, cambi, -quota, scelte. */
+    private static final class PlanState {
+        int last;
+        int[] counts;
+        int switches;
+        double neg;
+        int[] seq;
+
+        int unfair() {
+            int sum = 0;
+            for (int c : counts) sum += c * c;
+            return sum;
         }
-        for (int i = from; i < v; i++) {
-            cur.add(i);
-            combos(v, k, i + 1, cur, out);
-            cur.remove(cur.size() - 1);
+
+        /** Meno squilibrio, poi meno cambi, poi più quota. */
+        boolean betterThan(PlanState o) {
+            int a = unfair();
+            int b = o.unfair();
+            if (a != b) return a < b;
+            if (switches != o.switches) return switches < o.switches;
+            return neg < o.neg;
         }
     }
 
     /**
-     * Proposta automatica: ogni oggetto visibile riceve lo stesso numero di periodi attivi (±1),
-     * nei periodi dove è più alto; poi scambi che riducono i cambi di oggetto senza perdere quota.
+     * Proposta automatica sui periodi attivi, in ordine di importanza:
+     * 1. più ore possibili: ogni periodo attivo con almeno un oggetto alto ne riceve uno visibile;
+     * 2. più equa possibile: stesso numero di periodi per oggetto (minima somma dei quadrati);
+     * 3. ore consecutive: meno cambi di oggetto possibile;
+     * 4. a parità, ogni oggetto nei periodi dove è più alto.
      * I periodi spenti propongono l'oggetto migliore. Scrive "proposed" e "choice".
      * Come sky.plan_propose su Windows.
      */
@@ -507,74 +470,51 @@ public final class NightSky {
                 // i periodi senza nessun oggetto alto non contano: prenderebbero la quota di un oggetto
                 if (pick[i] >= 0 && periods.getJSONObject(i).optBoolean("enabled")) active.add(i);
             }
-            List<Integer> visible = new ArrayList<>();
-            for (int o = 0; o < m; o++) {
+            if (!active.isEmpty()) {
+                // per ogni stato (ultimo oggetto, periodi per oggetto) basta la strada con meno
+                // cambi e più quota: l'equità si giudica alla fine
+                Map<String, PlanState> states = new java.util.LinkedHashMap<>();
+                PlanState first = new PlanState();
+                first.last = -1;
+                first.counts = new int[m];
+                first.seq = new int[0];
+                states.put("", first);
                 for (int i : active) {
-                    if (score[i][o] > -1000) {
-                        visible.add(o);
-                        break;
-                    }
-                }
-            }
-            if (!active.isEmpty() && !visible.isEmpty()) {
-                int e = active.size();
-                int v = visible.size();
-                List<List<Integer>> extras = new ArrayList<>();
-                combos(v, e % v, 0, new ArrayList<>(), extras);
-                double bestTotal = 0;
-                int[] best = null;
-                for (List<Integer> extra : extras) {
-                    List<Integer> cols = new ArrayList<>();
-                    for (int c = 0; c < v; c++) {
-                        int copies = e / v + (extra.contains(c) ? 1 : 0);
-                        for (int r = 0; r < copies; r++) cols.add(visible.get(c));
-                    }
-                    double[][] cost = new double[e][cols.size()];
-                    for (int r = 0; r < e; r++) {
-                        for (int c = 0; c < cols.size(); c++) cost[r][c] = -score[active.get(r)][cols.get(c)];
-                    }
-                    int[] colOf = hungarian(cost);
-                    double total = 0;
-                    int[] chosen = new int[e];
-                    for (int r = 0; r < e; r++) {
-                        chosen[r] = cols.get(colOf[r]);
-                        total += score[active.get(r)][chosen[r]];
-                    }
-                    if (best == null || total > bestTotal + 1e-9) {
-                        best = chosen;
-                        bestTotal = total;
-                    }
-                }
-                for (int r = 0; r < e; r++) {
-                    int i = active.get(r);
-                    int o = best[r];
-                    pick[i] = score[i][o] > -1000 ? o : bestOf(score[i]);
-                }
-                boolean changed = true;
-                while (changed) {
-                    changed = false;
-                    for (int x = 0; x < e; x++) {
-                        for (int y = x + 1; y < e; y++) {
-                            int i = active.get(x);
-                            int j = active.get(y);
-                            int a = pick[i];
-                            int b = pick[j];
-                            if (a == b || a < 0 || b < 0) continue;
-                            double before = score[i][a] + score[j][b];
-                            double after = score[i][b] + score[j][a];
-                            if (after < before - 4.0 || Math.min(score[i][b], score[j][a]) <= -1000) continue;
-                            int old = switches(pick, active);
-                            pick[i] = b;
-                            pick[j] = a;
-                            if (switches(pick, active) < old) {
-                                changed = true;
-                            } else {
-                                pick[i] = a;
-                                pick[j] = b;
+                    Map<String, PlanState> next = new java.util.LinkedHashMap<>();
+                    for (PlanState s : states.values()) {
+                        for (int o = 0; o < m; o++) {
+                            if (score[i][o] <= -1000) continue;
+                            int[] counts = s.counts.clone();
+                            counts[o]++;
+                            int sw = s.switches + (s.last != -1 && s.last != o ? 1 : 0);
+                            double neg = s.neg - score[i][o];
+                            String key = o + ":" + java.util.Arrays.toString(counts);
+                            PlanState old = next.get(key);
+                            if (old != null && (old.switches < sw || (old.switches == sw && old.neg <= neg))) {
+                                continue;
                             }
+                            PlanState n = old != null ? old : new PlanState();
+                            n.last = o;
+                            n.counts = counts;
+                            n.switches = sw;
+                            n.neg = neg;
+                            n.seq = java.util.Arrays.copyOf(s.seq, s.seq.length + 1);
+                            n.seq[s.seq.length] = o;
+                            if (old == null) next.put(key, n);
                         }
                     }
+                    if (next.size() > PLAN_STATES_MAX) { // tanti oggetti: si tengono le strade migliori
+                        List<Map.Entry<String, PlanState>> keep = new ArrayList<>(next.entrySet());
+                        Collections.sort(keep, (a, b) -> a.getValue().betterThan(b.getValue()) ? -1
+                                : b.getValue().betterThan(a.getValue()) ? 1 : 0);
+                        next = new java.util.LinkedHashMap<>();
+                        for (int n = 0; n < PLAN_STATES_MAX; n++) next.put(keep.get(n).getKey(), keep.get(n).getValue());
+                    }
+                    states = next;
                 }
+                PlanState best = null;
+                for (PlanState s : states.values()) if (best == null || s.betterThan(best)) best = s;
+                for (int r = 0; r < active.size(); r++) pick[active.get(r)] = best.seq[r];
             }
             for (int i = 0; i < k; i++) periods.getJSONObject(i).put("proposed", pick[i]).put("choice", pick[i]);
         } catch (Exception ignored) {
@@ -585,12 +525,6 @@ public final class NightSky {
         int best = 0;
         for (int o = 1; o < row.length; o++) if (row[o] > row[best]) best = o;
         return row[best] > -1000 ? best : -1;
-    }
-
-    private static int switches(int[] pick, List<Integer> active) {
-        int n = 0;
-        for (int r = 1; r < active.size(); r++) if (pick[active.get(r)] != pick[active.get(r - 1)]) n++;
-        return n;
     }
 
     /** Ricava "steps" (per l'Helper, periodi consecutivi uguali uniti) e "lines" dai periodi. */

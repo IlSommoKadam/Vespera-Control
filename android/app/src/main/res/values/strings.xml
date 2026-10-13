@@ -216,7 +216,7 @@
     <string name="plan_helper_title">Piano caricato sull\'Helper</string>
     <string name="plan_propose">Proposta automatica</string>
     <string name="plan_none_option">— nessun oggetto —</string>
-    <string name="plan_periods_help">%1$d periodi da %2$d min. Spunta i periodi da usare e scegli l\'oggetto (★ = proposto, il più alto).</string>
+    <string name="plan_periods_help">%1$d periodi da %2$d min. Spunta i periodi da usare e scegli l\'oggetto (★ = proposto).</string>
     <string name="plan_periods_off">%1$d spenti: nuvoloso/pioggia o nessun oggetto alto.</string>
     <string name="plan_empty">Nessun periodo attivo con un oggetto: spunta almeno un periodo.</string>
     <string name="plan_save">Salva piano</string>

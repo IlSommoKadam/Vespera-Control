@@ -13,8 +13,8 @@ from pathlib import Path
 
 MEGA_FOLDER = "https://mega.nz/folder/6xgAFYqY#fvY3ii_8ytQtujuGIMATmQ"
 VERSION_FILE = "vespera-control-win-version.json"
-LOCAL_VERSION = "0.2.67"
-LOCAL_CODE = 70
+LOCAL_VERSION = "0.2.68"
+LOCAL_CODE = 71
 
 
 def compare_version(left: str, right: str) -> int:
