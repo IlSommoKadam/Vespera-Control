@@ -1196,8 +1196,9 @@ def plan_propose(plan: dict) -> None:
         o = max(range(m), key=lambda k: (score[i][k], -k))
         return o if score[i][o] > -1000 else -1
 
-    active = [i for i, p in enumerate(periods) if p.get("enabled")]
     pick = {i: best_of(i) for i in range(len(periods))}
+    # i periodi senza nessun oggetto alto non contano: prenderebbero la quota di un oggetto
+    active = [i for i, p in enumerate(periods) if p.get("enabled") and pick[i] >= 0]
     visible = [o for o in range(m) if any(score[i][o] > -1000 for i in active)]
     if active and visible:
         e, v = len(active), len(visible)

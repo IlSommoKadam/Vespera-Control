@@ -504,7 +504,8 @@ public final class NightSky {
             List<Integer> active = new ArrayList<>();
             for (int i = 0; i < k; i++) {
                 pick[i] = bestOf(score[i]);
-                if (periods.getJSONObject(i).optBoolean("enabled")) active.add(i);
+                // i periodi senza nessun oggetto alto non contano: prenderebbero la quota di un oggetto
+                if (pick[i] >= 0 && periods.getJSONObject(i).optBoolean("enabled")) active.add(i);
             }
             List<Integer> visible = new ArrayList<>();
             for (int o = 0; o < m; o++) {
