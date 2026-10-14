@@ -154,6 +154,9 @@
     <string name="flag_watchdog">Watchdog Singularity</string>
     <string name="flag_ftp_local">FTP locale</string>
     <string name="flag_keep_alive">Keep-alive</string>
+    <string name="flag_track_retry">Ritenta tracking</string>
+    <string name="label_track_retry_min">Ritenta tracking ogni (min)</string>
+    <string name="label_track_retry_help">Se il firmware ferma l\'osservazione per nuvole, astrometria, fuoco o tracking. Non per sole alto, batteria, memoria piena o stop a mano.</string>
     <string name="flag_sun_check">Controllo sole</string>
     <string name="flag_sun_sync">Sync a sole alto</string>
     <string name="flag_sun_telescope">Spegni telescopio (sole)</string>
@@ -217,7 +220,7 @@
     <string name="plan_propose">Proposta automatica</string>
     <string name="plan_none_option">— nessun oggetto —</string>
     <string name="plan_periods_help">%1$d periodi da %2$d min. Spunta i periodi da usare e scegli l\'oggetto (★ = proposto).</string>
-    <string name="plan_periods_off">%1$d spenti: nuvoloso/pioggia o nessun oggetto alto.</string>
+    <string name="plan_periods_off">%1$d spenti: nessun oggetto alto o tolti a mano.</string>
     <string name="plan_empty">Nessun periodo attivo con un oggetto: spunta almeno un periodo.</string>
     <string name="plan_save">Salva piano</string>
     <string name="plan_send">Carica sull\'Helper</string>

@@ -1346,7 +1346,7 @@ def plan_night(lat: float, lon: float, items: list[dict], night: date) -> dict:
     La notte (sole sotto -6°, da adesso se è già iniziata) è divisa in periodi tutti uguali:
     un multiplo del numero di oggetti, lunghi circa 75 min e mai meno di 60. Ogni periodo
     ha il suo meteo (sereno / poco nuvoloso / nuvoloso / pioggia, con nubi e pioggia %),
-    l'altezza di ogni oggetto e la proposta automatica; nuvoloso e pioggia partono spenti.
+    l'altezza di ogni oggetto e la proposta automatica; nuvoloso e pioggia restano accesi.
     L'utente può accendere/spegnere i periodi e cambiare l'oggetto (poi plan_finalize).
     Come NightSky.plan dell'APK."""
     weather_ok = _weather_cached(lat, lon) is not None
@@ -1413,18 +1413,25 @@ def plan_night(lat: float, lon: float, items: list[dict], night: date) -> dict:
                     alts.append([round(sum(vals) / len(vals), 1), round(min(vals), 1), round(max(vals), 1)])
                 periods.append({
                     "start": int(p0.timestamp() * 1000), "end": int(p1.timestamp() * 1000),
-                    "sky": sky, "enabled": not sky or sky["kind"] in (SKY_SUNNY, SKY_FEW),
+                    "sky": sky, "enabled": True,
                     "alts": alts, "proposed": -1, "choice": -1,
                 })
     plan = {
         "title": f"Piano {_it_short(night)}", "night": night.isoformat(), "created": int(time.time() * 1000),
         "items": objs, "periods": periods, "weather": seen, "parkAtEnd": True,
     }
-    plan_propose(plan)
-    for p in periods:
-        if p["proposed"] < 0:
-            p["enabled"] = False
+    plan_reset(plan)
     return plan_finalize(plan)
+
+
+def plan_reset(plan: dict) -> None:
+    """Spunte da capo e proposta: accesi tutti i periodi con almeno un oggetto sopra 15°, anche
+    con nuvole o pioggia previste (se il cielo si apre il Vespera continua; se il firmware si
+    ferma l'Helper ritenta). Come NightSky.resetPlan dell'APK."""
+    m = len(plan.get("items") or [])
+    for p in plan.get("periods") or []:
+        p["enabled"] = any(_period_score(p["alts"][o]) > -1000 for o in range(m))
+    plan_propose(plan)
 
 
 def _it_short(d: date) -> str:

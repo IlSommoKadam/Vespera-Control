@@ -521,6 +521,26 @@ public final class NightSky {
         }
     }
 
+    /**
+     * Spunte da capo e proposta: accesi tutti i periodi con almeno un oggetto sopra 15°, anche con
+     * nuvole o pioggia previste (se il cielo si apre il Vespera continua; se il firmware si ferma
+     * l'Helper ritenta). Come sky.plan_reset su Windows.
+     */
+    public static void resetPlan(JSONObject plan) {
+        try {
+            JSONArray periods = plan.optJSONArray("periods");
+            int m = plan.optJSONArray("items") == null ? 0 : plan.optJSONArray("items").length();
+            for (int i = 0; periods != null && i < periods.length(); i++) {
+                JSONObject p = periods.getJSONObject(i);
+                boolean any = false;
+                for (int o = 0; o < m && !any; o++) any = periodScore(alts(p, o)) > -1000;
+                p.put("enabled", any);
+            }
+        } catch (Exception ignored) {
+        }
+        propose(plan);
+    }
+
     private static int bestOf(double[] row) {
         int best = 0;
         for (int o = 1; o < row.length; o++) if (row[o] > row[best]) best = o;
@@ -775,7 +795,7 @@ public final class NightSky {
      * La notte (sole sotto -6°, da adesso se è già iniziata) è divisa in periodi tutti uguali:
      * un multiplo del numero di oggetti, lunghi circa 75 min e mai meno di 60. Ogni periodo ha
      * il suo meteo (sereno / poco nuvoloso / nuvoloso / pioggia, con nubi e pioggia %), l'altezza
-     * di ogni oggetto e la proposta automatica; nuvoloso e pioggia partono spenti.
+     * di ogni oggetto e la proposta automatica; nuvoloso e pioggia restano accesi.
      * L'utente accende/spegne i periodi e cambia l'oggetto (poi {@link #finalizePlan}).
      * Come sky.plan_night su Windows. JSON: title, night, created, items, periods
      * [{start,end,sky{kind,cloud,pop,level},enabled,alts[[media,min,max]],proposed,choice}],
@@ -835,14 +855,12 @@ public final class NightSky {
                         JSONObject p = new JSONObject();
                         p.put("start", p0.toInstant().toEpochMilli());
                         p.put("end", p1.toInstant().toEpochMilli());
-                        boolean enabled = true;
                         if (cloudN > 0) {
                             seen = true;
                             int cloud = Math.round(cloudSum / (float) cloudN);
                             String kind = skyKind(cloud, popMax);
                             p.put("sky", new JSONObject().put("kind", kind).put("cloud", cloud)
                                     .put("pop", popMax).put("level", weatherLevel(cloud, popMax)));
-                            enabled = kind.equals(SKY_SUNNY) || kind.equals(SKY_FEW);
                         }
                         JSONArray alts = new JSONArray();
                         for (Item item : items) {
@@ -860,7 +878,7 @@ public final class NightSky {
                             alts.put(new JSONArray().put(Math.round(avg * 10) / 10.0)
                                     .put(Math.round(lo * 10) / 10.0).put(Math.round(hi * 10) / 10.0));
                         }
-                        p.put("enabled", enabled);
+                        p.put("enabled", true);
                         p.put("alts", alts);
                         p.put("proposed", -1);
                         p.put("choice", -1);
@@ -880,11 +898,7 @@ public final class NightSky {
             out.put("periods", periods);
             out.put("weather", seen);
             out.put("parkAtEnd", true);
-            propose(out);
-            for (int i = 0; i < periods.length(); i++) {
-                JSONObject p = periods.getJSONObject(i);
-                if (p.optInt("proposed", -1) < 0) p.put("enabled", false);
-            }
+            resetPlan(out);
             finalizePlan(out);
         } catch (Exception ignored) {
         }

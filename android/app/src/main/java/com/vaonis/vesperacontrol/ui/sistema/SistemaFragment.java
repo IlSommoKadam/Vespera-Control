@@ -7,6 +7,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -42,6 +43,7 @@ public class SistemaFragment extends Fragment implements TabRefreshable {
             {"watchdog", "flag_watchdog"},
             {"ftpLocal", "flag_ftp_local"},
             {"keepAlive", "flag_keep_alive"},
+            {"trackRetry", "flag_track_retry"},
             {"sunCheck", "flag_sun_check"},
             {"sunSync", "flag_sun_sync"},
             {"sunTelescopeShutdown", "flag_sun_telescope"},
@@ -50,6 +52,7 @@ public class SistemaFragment extends Fragment implements TabRefreshable {
     };
 
     private final Map<String, CheckBox> flagBoxes = new LinkedHashMap<>();
+    private EditText editRetryMin;
     private TextView textLog;
     private AdbBridge adb;
 
@@ -67,6 +70,7 @@ public class SistemaFragment extends Fragment implements TabRefreshable {
         adb = AdbBridgeHolder.get(requireContext());
         textLog = view.findViewById(R.id.textSistemaLog);
         buildFlags(view.findViewById(R.id.flagsContainer));
+        editRetryMin = view.findViewById(R.id.editTrackRetryMin);
 
         view.<Button>findViewById(R.id.btnApplySystem)
                 .setOnClickListener(v -> applySystem());
@@ -125,6 +129,11 @@ public class SistemaFragment extends Fragment implements TabRefreshable {
             for (Map.Entry<String, CheckBox> e : flagBoxes.entrySet()) {
                 payload.put(e.getKey(), e.getValue().isChecked());
             }
+            try {
+                int minutes = Integer.parseInt(editRetryMin.getText().toString().trim());
+                payload.put("trackRetryMin", Math.max(2, Math.min(120, minutes)));
+            } catch (NumberFormatException ignored) {
+            }
             String line = "set|system|" + payload.toString();
             adb.sendLine(line, (ok, msg) -> postUi(() -> {
                 textLog.setText(msg);
@@ -164,6 +173,9 @@ public class SistemaFragment extends Fragment implements TabRefreshable {
             if (system.has(e.getKey())) {
                 e.getValue().setChecked(system.optBoolean(e.getKey(), e.getValue().isChecked()));
             }
+        }
+        if (system.has("trackRetryMin") && editRetryMin != null) {
+            editRetryMin.setText(String.valueOf(system.optInt("trackRetryMin")));
         }
     }
 

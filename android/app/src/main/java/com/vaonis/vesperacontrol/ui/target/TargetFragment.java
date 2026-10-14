@@ -963,10 +963,10 @@ public class TargetFragment extends Fragment implements TabRefreshable {
         planChanged();
     }
 
-    /** Rifà la proposta sui periodi attivi (spunte come sono ora). */
+    /** Rimette le spunte (tutti i periodi con un oggetto alto) e rifà la proposta. */
     private void proposePlan() {
         if (currentPlan == null || currentPlan.optJSONArray("periods") == null) return;
-        NightSky.propose(currentPlan);
+        NightSky.resetPlan(currentPlan);
         planChanged();
     }
 

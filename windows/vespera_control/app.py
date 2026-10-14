@@ -69,6 +69,7 @@ SYSTEM_FLAGS = [
     ("watchdog", "Watchdog Singularity"),
     ("ftpLocal", "FTP locale"),
     ("keepAlive", "Keep-alive"),
+    ("trackRetry", "Ritenta tracking"),
     ("sunCheck", "Controllo sole"),
     ("sunSync", "Sync a sole alto"),
     ("sunTelescopeShutdown", "Spegni telescopio (sole)"),
@@ -946,6 +947,14 @@ class App(tk.Tk):
             ttk.Checkbutton(grid, text=label, variable=var).grid(
                 row=i // 2, column=i % 2, sticky="w", padx=(0, 24), pady=2
             )
+        retry = ttk.Frame(card, style="Card.TFrame")
+        retry.pack(anchor="w", pady=(8, 0))
+        ttk.Label(retry, text="Ritenta tracking ogni", style="Card.TLabel").pack(side="left")
+        self.sys_retry_min = tk.IntVar(value=10)
+        ttk.Spinbox(retry, from_=2, to=120, width=5, textvariable=self.sys_retry_min).pack(side="left", padx=6)
+        ttk.Label(retry, text="min, se il firmware ferma l'osservazione per nuvole, astrometria, fuoco o "
+                              "tracking (non per sole alto, batteria, memoria piena o stop a mano)",
+                  style="Card.TLabel", wraplength=640).pack(side="left")
         ttk.Button(card, text="Applica su Pi", style="Primary.TButton", command=self.apply_system).pack(
             anchor="w", pady=(12, 0)
         )
@@ -1593,7 +1602,7 @@ class App(tk.Tk):
             off = sum(1 for p in periods if not p.get("enabled"))
             lines.append((-1, f"{len(periods)} periodi da {mins} min. Spunta i periodi da usare e scegli "
                               f"l'oggetto (★ = proposto)."
-                              + (f" {off} spenti: nuvoloso/pioggia o nessun oggetto alto." if off else "")))
+                              + (f" {off} spenti: nessun oggetto alto o tolti a mano." if off else "")))
             if not plan.get("steps"):
                 lines.append((-1, "Nessun periodo attivo con un oggetto: il piano è vuoto."))
         else:  # piani salvati prima della 0.2.31
@@ -1716,10 +1725,10 @@ class App(tk.Tk):
         self._plan_changed()
 
     def propose_plan(self) -> None:
-        """Rifà la proposta sui periodi attivi (spunte come sono ora)."""
+        """Rimette le spunte (tutti i periodi con un oggetto alto) e rifà la proposta."""
         if self._plan is None or not self._plan.get("periods"):
             return
-        sky.plan_propose(self._plan)
+        sky.plan_reset(self._plan)
         self._plan_changed()
 
     def save_plan(self) -> None:
@@ -2328,6 +2337,10 @@ class App(tk.Tk):
 
     def apply_system(self) -> None:
         payload = {key: var.get() for key, var in self._sys_vars.items()}
+        try:
+            payload["trackRetryMin"] = max(2, min(120, int(self.sys_retry_min.get())))
+        except (tk.TclError, ValueError):
+            pass
         line = "set|system|" + json.dumps(payload, separators=(",", ":"))
         self.cmd(line, wait=20)
 
@@ -2418,6 +2431,8 @@ class App(tk.Tk):
         for key, var in self._sys_vars.items():
             if key in syss:
                 var.set(bool(syss[key]))
+        if "trackRetryMin" in syss:
+            self.sys_retry_min.set(int(syss["trackRetryMin"]))
         keys = [k for k, _ in TELEGRAM_FLAGS]
         enabled = bool(tg.get("enabled")) if "enabled" in tg else any(bool(tg.get(k)) for k in keys)
         self._tg_binding = True

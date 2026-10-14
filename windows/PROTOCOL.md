@@ -66,11 +66,21 @@ Flag Telegram (Helper ≥ 0.8.51, in `set|telegram|{json}`): `reposition` accend
 `cmd|plan|load|{"title","night":"YYYY-MM-DD","parkAtEnd":true,"steps":[{"start":ms,"end":ms,"name","type","ra","dec","level"}]}`
 sostituisce il piano attivo (salvato in `plan.json`, sopravvive al riavvio). Ogni 30 s l'Helper:
 all'inizio di un passo continua la sessione multi-notte dell'oggetto se esiste, altrimenti ne crea una
-(init se serve); nelle pause non manda nulla (con le nuvole il firmware si ferma da solo); dentro un passo,
-se il Vespera si Ã¨ fermato riprova ogni 10 min (max 3); errori di avvio ritentati ogni 2 min (max 5);
+(init se serve); nelle pause non manda nulla; dentro un passo i tentativi seguono la sezione «Tentativi di tracking» sotto;
 a fine piano park se `parkAtEnd`. Stato in `remote.state.json` â†’ `plan`:
 `{active, title, night, done, message, current, steps:[{name,start,end,status}]}`.
 `telescope.captureStore` riporta le sessioni multi-notte per i client.
+
+### Tentativi di tracking ed errori del firmware (Helper ≥ 0.8.52, Control ≥ 0.2.69)
+
+Gli errori vengono dalle tabelle `ERRORS` del firmware 3.3.6 (`PREFISSO.NOME` o `PREFISSO_NOME`), classificati da `FirmwareErrors`:
+- **non si ritenta**: `SUN_TOO_HIGH`, `SUN_TOO_HIGH_AT_START_TIME`, `SUN_FILTER_DETECTED`, `BATTERY_TOO_LOW`, memoria (`NO_USER_STORAGE`, `NOT_ENOUGH_SPACE*`, `TOO_MANY_RESUMABLE_STORED`), spegnimento/aggiornamento, guasti (`CAMERA_*`, `NOT_CALIBRATED`, `BOARD_MOTOR_ERROR`, `MCBOARD_*`, `OPEN_ARM_FAILED`), `TIME_NOT_SET`, `POSITION_NOT_SET`, fine orario (`END_TIME_ALREADY_PASSED`, `REACHED_END_TIME`), parametri (`INVALID_TARGET`, `INCORRECT_PARAMS`);
+- **fermato a mano, non si ritenta**: `USER_INTERRUPTION`, `OPERATION_ABORTED`, `INTERRUPTED` (nel piano anche un'osservazione chiusa senza errori);
+- **si ritenta** (nuvole e simili): astrometria (`*ASTROMETRY_FAILED`), `IMAGE_TOO_DARK/BRIGHT`, `MEAN_VARIATION_IS_TOO_BIG`, fuoco (`AUTO_FOCUS_FAILED`, `PARABOLA_FIT_FAILED`…), tracking (`TRACKING_STOPPED`, `ONE_MOTOR_STOPPED_TRACKING`, `TRACKING_TIMEOUT`, `DID_NOT_CORRECT`), acquisizione e timeout, init (`AUTO_INIT_FAILED`, `ALL_ATTEMPTS_FAILED`), `BUSY`, `REQUIRE_RESOURCES_FAILED`, ed errori sconosciuti.
+
+`set|system|{"trackRetry":true,"trackRetryMin":10}` (default acceso, 10 min, 2…120): fuori dai piani l'Helper riprende ogni `trackRetryMin` minuti la sessione che il firmware ha fermato con un errore da ritentare, finché l'oggetto è sopra l'altezza minima e prima dell'alba. Nel piano (passo in corso) i tentativi li fa il piano: stesso intervallo, senza limite di numero finché il passo ha almeno 15 min; comandi rifiutati 5 volte ogni 2 min, poi ogni `trackRetryMin`; con un errore che non va ritentato il passo diventa «fermo: …» e riparte solo se l'oggetto torna in tracking (a mano) o al passo successivo. Stato in `system.trackRetry`, `system.trackRetryMin`.
+
+Piano della notte (Control ≥ 0.2.69): i periodi nuvolosi o con pioggia prevista restano accesi (spenti solo quelli senza oggetti sopra 15°); «Proposta automatica» rimette le spunte così e rifà la proposta.
 
 ### Tempo di tracking reale (Helper ≥ 0.8.47)
 

@@ -27,6 +27,39 @@
             android:layout_marginTop="12dp"
             android:orientation="vertical" />
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/label_track_retry_min"
+                android:textColor="@color/vespera_text"
+                android:textSize="14sp" />
+
+            <EditText
+                android:id="@+id/editTrackRetryMin"
+                android:layout_width="72dp"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:inputType="number"
+                android:maxLength="3"
+                android:text="10"
+                android:textColor="@color/vespera_text" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/label_track_retry_help"
+            android:textColor="@color/vespera_muted"
+            android:textSize="12sp" />
+
         <Button
             android:id="@+id/btnApplySystem"
             style="@style/Widget.Vespera.Button.Primary"
