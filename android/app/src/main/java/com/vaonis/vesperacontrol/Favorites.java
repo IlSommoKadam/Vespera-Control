@@ -18,6 +18,10 @@ public final class Favorites {
     private static final String PREFS = "vespera_device";
     private static final String KEY = "favorites";
     private static final String PLANS = "plans";
+    /** Cancellazioni [{created, at}] da propagare a Windows (shared.plans.json sul Pi). */
+    private static final String PLANS_DELETED = "plans_deleted";
+    private static final int MAX_PLANS = 30;
+    private static final long KEEP_DELETED_MS = 90L * 24 * 3600 * 1000;
 
     private Favorites() {
     }
@@ -98,6 +102,10 @@ public final class Favorites {
 
     /** Salva (o sostituisce, stesso "created") un piano in testa alla lista; max 30. */
     public static void savePlan(Context context, JSONObject plan) {
+        try {
+            plan.put("modified", System.currentTimeMillis());
+        } catch (Exception ignored) {
+        }
         List<JSONObject> list = plans(context);
         long created = plan.optLong("created");
         JSONArray arr = new JSONArray();
@@ -115,7 +123,81 @@ public final class Favorites {
         for (JSONObject o : plans(context)) {
             if (o.optLong("created") != created) arr.put(o);
         }
-        prefs(context).edit().putString(PLANS, arr.toString()).apply();
+        JSONArray gone = deleted(context);
+        try {
+            gone.put(new JSONObject().put("created", created).put("at", System.currentTimeMillis()));
+        } catch (Exception ignored) {
+        }
+        prefs(context).edit().putString(PLANS, arr.toString()).putString(PLANS_DELETED, gone.toString()).apply();
+    }
+
+    private static JSONArray deleted(Context context) {
+        try {
+            return new JSONArray(prefs(context).getString(PLANS_DELETED, "[]"));
+        } catch (Exception e) {
+            return new JSONArray();
+        }
+    }
+
+    private static long stamp(JSONObject plan) {
+        long modified = plan.optLong("modified", 0);
+        return modified > 0 ? modified : plan.optLong("created");
+    }
+
+    /**
+     * Unisce i piani del telefono con quelli di shared.plans.json (testo letto dal Pi, anche
+     * vuoto): per lo stesso "created" vince il "modified" più recente, un piano cancellato sparisce
+     * ovunque a meno che non sia risalvato dopo. Salva il risultato sul telefono e ritorna il
+     * testo da riscrivere sul Pi. Come plans_share.merge su Windows.
+     */
+    public static synchronized String mergeShared(Context context, String remoteText) throws Exception {
+        JSONObject remote = new JSONObject();
+        if (remoteText != null && !remoteText.trim().isEmpty()) {
+            try {
+                remote = new JSONObject(remoteText);
+            } catch (Exception ignored) {
+                // file rovinato: lo si riscrive da capo
+            }
+        }
+        java.util.Map<Long, JSONObject> byId = new java.util.HashMap<>();
+        java.util.Map<Long, Long> gone = new java.util.TreeMap<>();
+        JSONArray[] deletedLists = {deleted(context), remote.optJSONArray("deleted")};
+        for (JSONArray list : deletedLists) {
+            for (int i = 0; list != null && i < list.length(); i++) {
+                JSONObject d = list.optJSONObject(i);
+                if (d == null || !d.has("created")) continue;
+                long c = d.optLong("created");
+                gone.put(c, Math.max(gone.containsKey(c) ? gone.get(c) : 0L, d.optLong("at")));
+            }
+        }
+        List<JSONObject> all = new ArrayList<>(plans(context));
+        JSONArray remotePlans = remote.optJSONArray("plans");
+        for (int i = 0; remotePlans != null && i < remotePlans.length(); i++) {
+            JSONObject p = remotePlans.optJSONObject(i);
+            if (p != null && p.optJSONArray("steps") != null) all.add(p);
+        }
+        for (JSONObject p : all) {
+            long c = p.optLong("created");
+            if (c == 0) continue;
+            JSONObject old = byId.get(c);
+            if (old == null || stamp(p) > stamp(old)) byId.put(c, p);
+        }
+        long cutoff = System.currentTimeMillis() - KEEP_DELETED_MS;
+        gone.values().removeIf(at -> at < cutoff);
+        List<JSONObject> alive = new ArrayList<>();
+        for (JSONObject p : byId.values()) {
+            Long at = gone.get(p.optLong("created"));
+            if (at == null || stamp(p) > at) alive.add(p);
+        }
+        java.util.Collections.sort(alive, (a, b) -> Long.compare(stamp(b), stamp(a)));
+        JSONArray plans = new JSONArray();
+        for (int i = 0; i < alive.size() && i < MAX_PLANS; i++) plans.put(alive.get(i));
+        JSONArray deleted = new JSONArray();
+        for (java.util.Map.Entry<Long, Long> e : gone.entrySet()) {
+            deleted.put(new JSONObject().put("created", e.getKey()).put("at", e.getValue()));
+        }
+        prefs(context).edit().putString(PLANS, plans.toString()).putString(PLANS_DELETED, deleted.toString()).commit();
+        return new JSONObject().put("version", 1).put("plans", plans).put("deleted", deleted).toString();
     }
 
     public static String keyOf(String name) {

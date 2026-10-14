@@ -36,6 +36,13 @@ public final class AdbBridge {
     public static final String REMOTE_REQ = REMOTE_FILES_DIR + "remote.req";
     public static final String REMOTE_STATE = REMOTE_FILES_DIR + "remote.state.json";
     public static final String REMOTE_ACK = REMOTE_FILES_DIR + "remote.ack";
+    /** Piani salvati condivisi con Vespera Control Windows. */
+    public static final String REMOTE_SHARED_PLANS = REMOTE_FILES_DIR + "shared.plans.json";
+
+    /** Unisce il testo di un file del Pi (vuoto se non c'è) e ritorna quello da riscrivere. */
+    public interface Merge {
+        String apply(String remoteText) throws Exception;
+    }
 
     private static final String TAG = "AdbBridge";
 
@@ -267,6 +274,33 @@ public final class AdbBridge {
                 deliver(callback, true, remotePath);
             } catch (IOException e) {
                 deliver(callback, false, failText(e, "Lettura fallita"));
+            }
+        });
+    }
+
+    /**
+     * Legge {@code remotePath} dal Pi (vuoto se non esiste), lo passa a {@code merge} e riscrive
+     * il risultato, tutto nello stesso giro: con un errore di rete non scrive nulla.
+     */
+    public void mergeRemote(String remotePath, Merge merge, ResultCallback callback) {
+        executor.execute(() -> {
+            try {
+                String remote = "";
+                try {
+                    remote = new String(withClient(c -> c.pullBytes(remotePath)), StandardCharsets.UTF_8);
+                } catch (AdbClient.RemoteFail missing) {
+                    // file non ancora creato
+                }
+                byte[] out = merge.apply(remote).getBytes(StandardCharsets.UTF_8);
+                withClient(c -> {
+                    c.pushBytes(remotePath, out);
+                    return null;
+                });
+                deliver(callback, true, remotePath);
+            } catch (IOException e) {
+                deliver(callback, false, failText(e, "Condivisione fallita"));
+            } catch (Exception e) {
+                deliver(callback, false, String.valueOf(e.getMessage()));
             }
         });
     }

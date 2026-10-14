@@ -34,6 +34,7 @@ from vespera_control.scrcpy_util import (  # noqa: E402
     scrcpy_help,
 )
 from vespera_control import sky  # noqa: E402
+from vespera_control import plans_share  # noqa: E402
 from vespera_control.forecast_footer import ForecastFooter  # noqa: E402
 from vespera_control.updates import LOCAL_CODE, LOCAL_VERSION  # noqa: E402
 from vespera_control import instrument_status as istatus  # noqa: E402
@@ -298,6 +299,8 @@ class App(tk.Tk):
         self.fav_status = tk.StringVar(value="")
         # Piano della notte (come APK)
         self.plans: list[dict] = []
+        self.plans_deleted: list[dict] = []  # cancellazioni da propagare all'APK (shared.plans.json)
+        self._plans_sync_error = ""
         self.fav_checks: dict[str, tk.BooleanVar] = {}
         self._fav_widgets: list = []
         self._plan: dict | None = None
@@ -316,6 +319,7 @@ class App(tk.Tk):
                 self.scrcpy_path.set(str(found))
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.after(100, self._poll)
+        self.after(8000, self._plans_tick)
         if self.pi_host.get().strip():
             self.after(1500, self.refresh_state)
         else:
@@ -1735,21 +1739,56 @@ class App(tk.Tk):
         if self._plan is None:
             return
         created = self._plan.get("created")
+        self._plan["modified"] = int(time.time() * 1000)
         self.plans = [self._plan] + [p for p in self.plans if p.get("created") != created][:29]
         self._plan_saved = True
         self._save_settings()
         self._show_saved_plans()
         self._show_plan(self._plan, saved=True)
         self.set_status("Piano salvato.", "ok")
+        self.sync_plans()
 
     def delete_plan(self) -> None:
         if self._plan is None or not self._plan_saved:
             return
         created = self._plan.get("created")
         self.plans = [p for p in self.plans if p.get("created") != created]
+        self.plans_deleted.append({"created": created, "at": int(time.time() * 1000)})
         self._save_settings()
         self._show_saved_plans()
         self._plan_message("Piano eliminato.")
+        self.sync_plans()
+
+    def _plans_tick(self) -> None:
+        self.sync_plans()
+        self.after(5 * 60_000, self._plans_tick)
+
+    def sync_plans(self) -> None:
+        """Condivide i piani salvati con l'APK tramite shared.plans.json sul Pi (in background)."""
+        plans, deleted = list(self.plans), list(self.plans_deleted)
+
+        def work() -> None:
+            try:
+                merged = plans_share.sync(self.ensure_bridge(), plans, deleted)
+                self.queue.put(("plans_synced", merged, ""))
+            except Exception as exc:
+                self.queue.put(("plans_synced", None, str(exc)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_plans_synced(self, merged, error: str) -> None:
+        if merged is None:
+            if error != self._plans_sync_error:
+                self._plans_sync_error = error
+                self.log(f"Condivisione piani col Pi non riuscita: {error}")
+            return
+        self._plans_sync_error = ""
+        # di nuovo con i piani locali: un salvataggio fatto durante la sync non va perso
+        plans, deleted = plans_share.merge((self.plans, self.plans_deleted), merged)
+        if plans != self.plans or deleted != self.plans_deleted:
+            self.plans, self.plans_deleted = plans, deleted
+            self._save_settings()
+            self._show_saved_plans()
 
     def send_plan(self) -> None:
         if self._plan is None:
@@ -2770,6 +2809,8 @@ class App(tk.Tk):
                     self._on_favorites(item[1], item[2])
                 elif kind == "plan":
                     self._on_plan(item[1])
+                elif kind == "plans_synced":
+                    self._on_plans_synced(item[1], item[2])
                 elif kind == "plan_sent":
                     self.plan_helper.set(item[1])
                 elif kind == "site_found":
@@ -2822,6 +2863,9 @@ class App(tk.Tk):
         plans = raw.get("plans")
         if isinstance(plans, list):
             self.plans = [p for p in plans if isinstance(p, dict) and isinstance(p.get("steps"), list)]
+        deleted = raw.get("plans_deleted")
+        if isinstance(deleted, list):
+            self.plans_deleted = [d for d in deleted if isinstance(d, dict)]
             if hasattr(self, "plans_list"):
                 self._show_saved_plans()
         favs = raw.get("favorites")
@@ -2843,6 +2887,7 @@ class App(tk.Tk):
             "ftp_source": self.ftp_source.get(),
             "favorites": self.favorites,
             "plans": self.plans,
+            "plans_deleted": self.plans_deleted,
         }
         site = self._site()
         if site:

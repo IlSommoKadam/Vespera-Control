@@ -185,6 +185,7 @@ public class TargetFragment extends Fragment implements TabRefreshable {
     public void onTabSelected() {
         refreshStatus();
         startAutoRefresh();
+        syncPlans();
     }
 
     @Override
@@ -193,6 +194,7 @@ public class TargetFragment extends Fragment implements TabRefreshable {
         if (adb != null) {
             refreshStatus();
             if (!isHidden()) startAutoRefresh();
+            syncPlans();
         }
     }
 
@@ -991,12 +993,14 @@ public class TargetFragment extends Fragment implements TabRefreshable {
         btnPlanDelete.setVisibility(View.VISIBLE);
         Toast.makeText(requireContext(), "Piano salvato", Toast.LENGTH_SHORT).show();
         showSavedPlans();
+        syncPlans();
     }
 
     private void deletePlan() {
         if (currentPlan == null || !currentPlanSaved) return;
         Favorites.deletePlan(requireContext(), currentPlan.optLong("created"));
         Toast.makeText(requireContext(), "Piano eliminato", Toast.LENGTH_SHORT).show();
+        syncPlans();
         currentPlan = null;
         textPlan.setVisibility(View.GONE);
         rowPlanActions.setVisibility(View.GONE);
@@ -1152,6 +1156,18 @@ public class TargetFragment extends Fragment implements TabRefreshable {
             detail = m.find() ? "firmware " + m.group(1) : "firmware: comando rifiutato";
         }
         return prefix + detail;
+    }
+
+    /** Condivide i piani salvati con Vespera Control Windows tramite shared.plans.json sul Pi. */
+    private void syncPlans() {
+        if (adb == null || !adb.isConnected() || !isAdded()) return;
+        android.content.Context app = requireContext().getApplicationContext();
+        adb.mergeRemote(com.vaonis.vesperacontrol.adb.AdbBridge.REMOTE_SHARED_PLANS,
+                remote -> Favorites.mergeShared(app, remote),
+                (ok, msg) -> {
+                    if (!ok) android.util.Log.w("VesperaPlans", "sync piani: " + msg);
+                    postUi(this::showSavedPlans);
+                });
     }
 
     private void showSavedPlans() {
