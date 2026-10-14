@@ -194,8 +194,8 @@ public class TargetFragment extends Fragment implements TabRefreshable {
         if (adb != null) {
             refreshStatus();
             if (!isHidden()) startAutoRefresh();
-            syncPlans();
         }
+        syncPlans();
     }
 
     @Override
@@ -1158,16 +1158,10 @@ public class TargetFragment extends Fragment implements TabRefreshable {
         return prefix + detail;
     }
 
-    /** Condivide i piani salvati con Vespera Control Windows tramite shared.plans.json sul Pi. */
+    /** Condivide i piani salvati con Vespera Control Windows: sul Pi e nel bot Telegram. */
     private void syncPlans() {
-        if (adb == null || !adb.isConnected() || !isAdded()) return;
-        android.content.Context app = requireContext().getApplicationContext();
-        adb.mergeRemote(com.vaonis.vesperacontrol.adb.AdbBridge.REMOTE_SHARED_PLANS,
-                remote -> Favorites.mergeShared(app, remote),
-                (ok, msg) -> {
-                    if (!ok) android.util.Log.w("VesperaPlans", "sync piani: " + msg);
-                    postUi(this::showSavedPlans);
-                });
+        if (!isAdded()) return;
+        com.vaonis.vesperacontrol.PlansCloud.sync(requireContext(), adb, () -> postUi(this::showSavedPlans));
     }
 
     private void showSavedPlans() {

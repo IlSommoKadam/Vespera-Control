@@ -155,6 +155,14 @@
     <string name="flag_ftp_local">FTP locale</string>
     <string name="flag_keep_alive">Keep-alive</string>
     <string name="flag_track_retry">Ritenta tracking</string>
+    <string name="plans_share_title">Piani condivisi con Windows (anche a Pi spento)</string>
+    <string name="plans_share_hint">I piani salvati si allineano con Windows sul Pi e, col bot impostato qui, come file fissato nella chat del bot Telegram: funziona da qualunque rete, anche col Pi spento. Token e chat id sono quelli del bot dell\'Helper.</string>
+    <string name="plans_bot_token">Token del bot</string>
+    <string name="plans_bot_chat">Chat id</string>
+    <string name="plans_bot_from_helper">Prendi dall\'Helper</string>
+    <string name="plans_bot_sync">Salva e allinea</string>
+    <string name="plans_bot_fetching">Leggo il bot dall\'Helper…</string>
+    <string name="plans_syncing">Allineo i piani…</string>
     <string name="label_track_retry_min">Ritenta tracking ogni (min)</string>
     <string name="label_track_retry_help">Se il firmware ferma l\'osservazione per nuvole, astrometria, fuoco o tracking. Non per sole alto, batteria, memoria piena o stop a mano.</string>
     <string name="flag_sun_check">Controllo sole</string>

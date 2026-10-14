@@ -81,5 +81,78 @@
                 android:textColor="@color/vespera_muted"
                 android:textSize="12sp" />
         </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_section_panel"
+            android:padding="12dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/plans_share_title"
+                android:textColor="@color/vespera_title"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/plans_share_hint"
+                android:textColor="@color/vespera_muted"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/editPlansToken"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="@string/plans_bot_token"
+                android:inputType="textPassword"
+                android:textColor="@color/vespera_text" />
+
+            <EditText
+                android:id="@+id/editPlansChat"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="@string/plans_bot_chat"
+                android:inputType="numberSigned"
+                android:textColor="@color/vespera_text" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnPlansFromHelper"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="6dp"
+                    android:text="@string/plans_bot_from_helper" />
+
+                <Button
+                    android:id="@+id/btnPlansSync"
+                    style="@style/Widget.Vespera.Button.Primary"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/plans_bot_sync" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/textPlansStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="@color/vespera_text"
+                android:textSize="13sp" />
+        </LinearLayout>
     </LinearLayout>
 </ScrollView>

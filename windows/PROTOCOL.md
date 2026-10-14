@@ -82,11 +82,13 @@ Gli errori vengono dalle tabelle `ERRORS` del firmware 3.3.6 (`PREFISSO.NOME` o 
 
 Piano della notte (Control ≥ 0.2.69): i periodi nuvolosi o con pioggia prevista restano accesi (spenti solo quelli senza oggetti sopra 15°); «Proposta automatica» rimette le spunte così e rifà la proposta.
 
-### Piani salvati condivisi fra APK e Windows (Control ≥ 0.2.71)
+### Piani salvati condivisi fra APK e Windows (Control ≥ 0.2.71, Telegram ≥ 0.2.72)
 
 File `shared.plans.json` nella cartella dell'Helper (`/sdcard/Android/data/com.vaonis.vesperahelper/files/`), letto e scritto dai client via ADB (l'Helper non lo usa): `{"version":1,"plans":[…piani come in locale…],"deleted":[{"created","at"}]}`.
 Ogni client legge il file (assente = vuoto), lo unisce ai suoi piani e lo riscrive: per lo stesso `created` vince `modified` (messo a ogni «Salva»), un piano in `deleted` sparisce ovunque se non è stato risalvato dopo `at`; massimo 30 piani, cancellazioni tenute 90 giorni. Se la lettura fallisce per la rete non scrive nulla.
 Quando: APK all'apertura del tab Target e a ogni Salva/Elimina; Windows 8 s dopo l'avvio, ogni 5 min e a ogni Salva/Elimina.
+
+Copia nel bot Telegram (Control ≥ 0.2.72), per lavorare a Pi spento: stesso JSON come documento `vespera-plans.json` fissato nella chat del bot dell'Helper. Lettura: `getChat` → `pinned_message.document` → `getFile`; scrittura solo se cambia: `editMessageMedia` sullo stesso messaggio, se non riesce `sendDocument` + `pinChatMessage` (silenziosi). Token e chat id si inseriscono nei client (APK: tab Notifiche; Windows: tab Telegram) o si prendono dall'Helper con `get|telegram`; la prima sync col Pi li prende da sola. Se nella chat si fissa un altro messaggio la copia si perde: al giro dopo ne viene creata una nuova con i piani del client.
 
 ### Tempo di tracking reale (Helper ≥ 0.8.47)
 

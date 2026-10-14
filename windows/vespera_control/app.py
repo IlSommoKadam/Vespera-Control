@@ -301,6 +301,12 @@ class App(tk.Tk):
         self.plans: list[dict] = []
         self.plans_deleted: list[dict] = []  # cancellazioni da propagare all'APK (shared.plans.json)
         self._plans_sync_error = ""
+        self._plans_syncing = False
+        self._plans_tg_asked = False
+        # copia dei piani nel bot Telegram dell'Helper, per lavorare anche a Pi spento
+        self.plans_tg_token = tk.StringVar(value="")
+        self.plans_tg_chat = tk.StringVar(value="")
+        self.plans_sync_status = tk.StringVar(value="Piani condivisi: non ancora allineati")
         self.fav_checks: dict[str, tk.BooleanVar] = {}
         self._fav_widgets: list = []
         self._plan: dict | None = None
@@ -982,6 +988,28 @@ class App(tk.Tk):
             style="Muted.TLabel",
             wraplength=800,
         ).pack(anchor="w", pady=(4, 0))
+
+        share = self._card(self.tab_tg, "Piani condivisi con l'APK (anche a Pi spento)")
+        ttk.Label(
+            share,
+            text="I piani salvati vengono allineati con l'APK sul Pi e, se qui c'è il bot, anche come file "
+                 "fissato nella chat del bot Telegram: così funziona da qualunque rete, anche col Pi spento. "
+                 "Token e chat id sono quelli del bot dell'Helper.",
+            style="Muted.TLabel", wraplength=800,
+        ).pack(anchor="w")
+        row = ttk.Frame(share, style="Card.TFrame")
+        row.pack(fill="x", pady=(8, 0))
+        ttk.Label(row, text="Token bot", style="Card.TLabel").pack(side="left")
+        ttk.Entry(row, textvariable=self.plans_tg_token, show="•", width=50).pack(side="left", padx=6)
+        ttk.Label(row, text="Chat id", style="Card.TLabel").pack(side="left", padx=(12, 0))
+        ttk.Entry(row, textvariable=self.plans_tg_chat, width=16).pack(side="left", padx=6)
+        acts = ttk.Frame(share, style="Card.TFrame")
+        acts.pack(fill="x", pady=(8, 0))
+        ttk.Button(acts, text="Prendi dall'Helper", command=self.fetch_plans_bot).pack(side="left")
+        ttk.Button(acts, text="Salva e allinea ora", style="Primary.TButton",
+                   command=self._plans_bot_changed).pack(side="left", padx=6)
+        ttk.Label(share, textvariable=self.plans_sync_status, style="Card.TLabel",
+                  wraplength=800).pack(anchor="w", pady=(6, 0))
 
         events = self._card(self.tab_tg, "Avvisi singoli")
         grid = ttk.Frame(events, style="Card.TFrame")
@@ -1764,23 +1792,81 @@ class App(tk.Tk):
         self.after(5 * 60_000, self._plans_tick)
 
     def sync_plans(self) -> None:
-        """Condivide i piani salvati con l'APK tramite shared.plans.json sul Pi (in background)."""
+        """Condivide i piani salvati con l'APK (in background): shared.plans.json sul Pi e il
+        documento fissato nella chat del bot Telegram. Ognuno dei due può mancare."""
+        if self._plans_syncing:
+            return
+        self._plans_syncing = True
         plans, deleted = list(self.plans), list(self.plans_deleted)
+        token, chat = self.plans_tg_token.get().strip(), self.plans_tg_chat.get().strip()
+        ask_helper = not token and not self._plans_tg_asked
+        self._plans_tg_asked = True
 
         def work() -> None:
+            nonlocal plans, deleted, token, chat
+            done, errors = [], []
             try:
-                merged = plans_share.sync(self.ensure_bridge(), plans, deleted)
-                self.queue.put(("plans_synced", merged, ""))
+                bridge = self.ensure_bridge()
+                plans, deleted = plans_share.sync(bridge, plans, deleted)
+                done.append("Pi")
+                if ask_helper:  # prima volta: il bot lo prende dall'Helper
+                    token, chat = self._helper_bot(bridge)
+                    if token:
+                        self.queue.put(("plans_bot", token, chat))
             except Exception as exc:
-                self.queue.put(("plans_synced", None, str(exc)))
+                errors.append(f"Pi: {exc}")
+            if token and chat:
+                try:
+                    plans, deleted = plans_share.tg_sync(token, chat, plans, deleted)
+                    done.append("Telegram")
+                except Exception as exc:
+                    errors.append(f"Telegram: {exc}")
+            else:
+                errors.append("Telegram: bot non impostato")
+            self.queue.put(("plans_synced", (plans, deleted) if done else None, "; ".join(errors), done))
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _on_plans_synced(self, merged, error: str) -> None:
+    @staticmethod
+    def _helper_bot(bridge: AdbBridge) -> tuple[str, str]:
+        ack = bridge.send_command("get|telegram", wait_ack=20)
+        if not ack.startswith("OK|telegram|"):
+            return "", ""
+        data = json.loads(ack[len("OK|telegram|"):])
+        token = str(data.get("token") or "")
+        return ("", "") if token in ("", "***") else (token, str(data.get("chatId") or ""))
+
+    def fetch_plans_bot(self) -> None:
+        def job() -> None:
+            token, chat = self._helper_bot(self.ensure_bridge())
+            if not token:
+                self.queue.put(("status", "L'Helper non ha il bot Telegram impostato.", "warn"))
+                return
+            self.queue.put(("plans_bot", token, chat))
+
+        self.run_job(job)
+
+    def _on_plans_bot(self, token: str, chat: str) -> None:
+        self.plans_tg_token.set(token)
+        self.plans_tg_chat.set(chat)
+        self._plans_bot_changed()
+
+    def _plans_bot_changed(self) -> None:
+        self._save_settings()
+        self.sync_plans()
+
+    def _on_plans_synced(self, merged, error: str, done: list) -> None:
+        self._plans_syncing = False
+        stamp = datetime.now().strftime("%H:%M")
+        if done:
+            self.plans_sync_status.set(f"Piani allineati alle {stamp} con: {', '.join(done)}"
+                                       + (f"  ·  non riuscito: {error}" if error else ""))
+        else:
+            self.plans_sync_status.set(f"Piani non allineati ({stamp}): {error}")
         if merged is None:
             if error != self._plans_sync_error:
                 self._plans_sync_error = error
-                self.log(f"Condivisione piani col Pi non riuscita: {error}")
+                self.log(f"Condivisione piani non riuscita: {error}")
             return
         self._plans_sync_error = ""
         # di nuovo con i piani locali: un salvataggio fatto durante la sync non va perso
@@ -2810,7 +2896,9 @@ class App(tk.Tk):
                 elif kind == "plan":
                     self._on_plan(item[1])
                 elif kind == "plans_synced":
-                    self._on_plans_synced(item[1], item[2])
+                    self._on_plans_synced(item[1], item[2], item[3])
+                elif kind == "plans_bot":
+                    self._on_plans_bot(item[1], item[2])
                 elif kind == "plan_sent":
                     self.plan_helper.set(item[1])
                 elif kind == "site_found":
@@ -2863,11 +2951,13 @@ class App(tk.Tk):
         plans = raw.get("plans")
         if isinstance(plans, list):
             self.plans = [p for p in plans if isinstance(p, dict) and isinstance(p.get("steps"), list)]
+            if hasattr(self, "plans_list"):
+                self._show_saved_plans()
         deleted = raw.get("plans_deleted")
         if isinstance(deleted, list):
             self.plans_deleted = [d for d in deleted if isinstance(d, dict)]
-            if hasattr(self, "plans_list"):
-                self._show_saved_plans()
+        self.plans_tg_token.set(str(raw.get("plans_tg_token") or ""))
+        self.plans_tg_chat.set(str(raw.get("plans_tg_chat") or ""))
         favs = raw.get("favorites")
         if isinstance(favs, list):
             self.favorites = [f for f in favs if isinstance(f, dict) and f.get("name")]
@@ -2888,6 +2978,8 @@ class App(tk.Tk):
             "favorites": self.favorites,
             "plans": self.plans,
             "plans_deleted": self.plans_deleted,
+            "plans_tg_token": self.plans_tg_token.get().strip(),
+            "plans_tg_chat": self.plans_tg_chat.get().strip(),
         }
         site = self._site()
         if site:
