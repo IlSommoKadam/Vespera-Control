@@ -578,9 +578,12 @@ public final class NightSky {
                             + " non visibile: periodo non ripreso"));
                     continue;
                 }
-                int level = altitudeLevel(a[0]); // solo altezza: il meteo è nel testo della riga
+                // come i preferiti: il peggiore fra altezza e meteo; terzo campo = bloccato dal meteo
+                int high = altitudeLevel(a[0]);
+                int level = sky != null && sky.has("level") ? Math.min(high, sky.optInt("level")) : high;
+                boolean weather = level == NOT_VISIBLE && high > NOT_VISIBLE;
                 lines.put(new JSONArray().put(level).put(head + String.format(Locale.ITALY,
-                        "%s · %.0f° (min %.0f°)", item.optString("name"), a[0], a[1])));
+                        "%s · %.0f° (min %.0f°)", item.optString("name"), a[0], a[1])).put(weather));
                 JSONObject last = steps.length() == 0 ? null : steps.getJSONObject(steps.length() - 1);
                 if (last != null && last.optString("name").equals(item.optString("name"))
                         && last.optLong("end") == start) {

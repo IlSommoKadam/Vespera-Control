@@ -1204,9 +1204,12 @@ def plan_finalize(plan: dict) -> dict:
             lines.append([NONE, f"{span}  {sky_text(sky)}  →  {items[o].get('name')} non visibile: "
                                 f"periodo non ripreso"])
             continue
-        level = _altitude_level(avg)  # solo altezza: il meteo è nel testo della riga
+        # come i preferiti: il peggiore fra altezza e meteo; arancione se è solo il meteo a bloccare
+        high_level = _altitude_level(avg)
+        level = min(high_level, int(sky["level"])) if sky and "level" in sky else high_level
+        face = WEATHER_BLOCK if level == NOT_VISIBLE and high_level > NOT_VISIBLE else level
         item = items[o]
-        lines.append([level, f"{span}  {sky_text(sky)}  →  {item.get('name')} · {avg:.0f}° (min {low:.0f}°)"])
+        lines.append([face, f"{span}  {sky_text(sky)}  →  {item.get('name')} · {avg:.0f}° (min {low:.0f}°)"])
         if steps and steps[-1]["name"] == str(item.get("name") or "") and steps[-1]["end"] == p["start"]:
             steps[-1]["end"] = p["end"]
             steps[-1]["level"] = min(steps[-1]["level"], level)

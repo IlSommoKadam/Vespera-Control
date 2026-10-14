@@ -768,7 +768,8 @@ public class TargetFragment extends Fragment implements TabRefreshable {
             sb.append('\n');
             int level = line.optInt(0, -1);
             if (level >= 0) {
-                Drawable icon = ContextCompat.getDrawable(requireContext(), visibilityIcon(level));
+                Drawable icon = ContextCompat.getDrawable(requireContext(),
+                        visibilityIcon(level, line.optBoolean(2)));
                 if (icon != null) {
                     icon = icon.mutate();
                     icon.setBounds(0, 0, size, size);
@@ -827,7 +828,8 @@ public class TargetFragment extends Fragment implements TabRefreshable {
             JSONArray line = lines == null ? null : lines.optJSONArray(i);
             int level = line == null ? -1 : line.optInt(0, -1);
             int size = Math.round(label.getTextSize() * 1.2f);
-            Drawable icon = level >= 0 ? ContextCompat.getDrawable(requireContext(), visibilityIcon(level)) : null;
+            Drawable icon = level >= 0 ? ContextCompat.getDrawable(requireContext(),
+                    visibilityIcon(level, line.optBoolean(2))) : null;
             if (icon != null) {
                 icon = icon.mutate();
                 icon.setBounds(0, 0, size, size);
