@@ -989,28 +989,6 @@ class App(tk.Tk):
             wraplength=800,
         ).pack(anchor="w", pady=(4, 0))
 
-        share = self._card(self.tab_tg, "Piani condivisi con l'APK (anche a Pi spento)")
-        ttk.Label(
-            share,
-            text="I piani salvati vengono allineati con l'APK sul Pi e, se qui c'è il bot, anche come file "
-                 "fissato nella chat del bot Telegram: così funziona da qualunque rete, anche col Pi spento. "
-                 "Token e chat id sono quelli del bot dell'Helper.",
-            style="Muted.TLabel", wraplength=800,
-        ).pack(anchor="w")
-        row = ttk.Frame(share, style="Card.TFrame")
-        row.pack(fill="x", pady=(8, 0))
-        ttk.Label(row, text="Token bot", style="Card.TLabel").pack(side="left")
-        ttk.Entry(row, textvariable=self.plans_tg_token, show="•", width=50).pack(side="left", padx=6)
-        ttk.Label(row, text="Chat id", style="Card.TLabel").pack(side="left", padx=(12, 0))
-        ttk.Entry(row, textvariable=self.plans_tg_chat, width=16).pack(side="left", padx=6)
-        acts = ttk.Frame(share, style="Card.TFrame")
-        acts.pack(fill="x", pady=(8, 0))
-        ttk.Button(acts, text="Prendi dall'Helper", command=self.fetch_plans_bot).pack(side="left")
-        ttk.Button(acts, text="Salva e allinea ora", style="Primary.TButton",
-                   command=self._plans_bot_changed).pack(side="left", padx=6)
-        ttk.Label(share, textvariable=self.plans_sync_status, style="Card.TLabel",
-                  wraplength=800).pack(anchor="w", pady=(6, 0))
-
         events = self._card(self.tab_tg, "Avvisi singoli")
         grid = ttk.Frame(events, style="Card.TFrame")
         grid.pack(fill="x")
@@ -2055,6 +2033,28 @@ class App(tk.Tk):
             side="left", padx=(0, 6))
         ttk.Button(row, text="Dal Vespera", style="TButton", command=self.site_from_vespera).pack(side="left")
         ttk.Label(site, textvariable=self.site_text, style="Muted.TLabel").pack(anchor="w", pady=(6, 0))
+
+        share = self._card(self.tab_imp, "Piani condivisi con l'APK (anche a Pi spento)")
+        ttk.Label(
+            share,
+            text="I piani salvati vengono allineati con l'APK sul Pi e, se qui c'è il bot, anche come file "
+                 "fissato nella chat del bot Telegram: così funziona da qualunque rete, anche col Pi spento. "
+                 "Token e chat id sono quelli del bot dell'Helper.",
+            style="Muted.TLabel", wraplength=800,
+        ).pack(anchor="w")
+        row = ttk.Frame(share, style="Card.TFrame")
+        row.pack(fill="x", pady=(8, 0))
+        ttk.Label(row, text="Token bot", style="Card.TLabel").pack(side="left")
+        ttk.Entry(row, textvariable=self.plans_tg_token, show="•", width=50).pack(side="left", padx=6)
+        ttk.Label(row, text="Chat id", style="Card.TLabel").pack(side="left", padx=(12, 0))
+        ttk.Entry(row, textvariable=self.plans_tg_chat, width=16).pack(side="left", padx=6)
+        acts = ttk.Frame(share, style="Card.TFrame")
+        acts.pack(fill="x", pady=(8, 0))
+        ttk.Button(acts, text="Prendi dall'Helper", command=self.fetch_plans_bot).pack(side="left")
+        ttk.Button(acts, text="Salva e allinea ora", style="Primary.TButton",
+                   command=self._plans_bot_changed).pack(side="left", padx=6)
+        ttk.Label(share, textvariable=self.plans_sync_status, style="Card.TLabel",
+                  wraplength=800).pack(anchor="w", pady=(6, 0))
 
         upd = self._card(self.tab_imp, "Aggiornamenti app")
         ttk.Label(upd, text="Controllo automatico all'avvio. Qui puoi forzarlo.",

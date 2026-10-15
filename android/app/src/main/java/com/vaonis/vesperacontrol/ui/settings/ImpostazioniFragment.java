@@ -24,6 +24,7 @@ import androidx.fragment.app.Fragment;
 import com.vaonis.vesperacontrol.AdbBridgeHolder;
 import com.vaonis.vesperacontrol.DevicePrefs;
 import com.vaonis.vesperacontrol.ObservatorySite;
+import com.vaonis.vesperacontrol.PlansCloud;
 import com.vaonis.vesperacontrol.R;
 import com.vaonis.vesperacontrol.adb.AdbBridge;
 import com.vaonis.vesperacontrol.update.AppUpdates;
@@ -43,6 +44,9 @@ public class ImpostazioniFragment extends Fragment {
     private EditText editLon;
     private boolean fillingSite;
     private AdbBridge adb;
+    private EditText editPlansToken;
+    private EditText editPlansChat;
+    private TextView textPlansStatus;
 
     @Nullable
     @Override
@@ -70,6 +74,19 @@ public class ImpostazioniFragment extends Fragment {
         view.<Button>findViewById(R.id.btnSiteGps).setOnClickListener(v -> readGps());
         view.<Button>findViewById(R.id.btnSiteVespera).setOnClickListener(v -> readVespera());
 
+        editPlansToken = view.findViewById(R.id.editPlansToken);
+        editPlansChat = view.findViewById(R.id.editPlansChat);
+        textPlansStatus = view.findViewById(R.id.textPlansStatus);
+        editPlansToken.setText(PlansCloud.token(requireContext()));
+        editPlansChat.setText(PlansCloud.chat(requireContext()));
+        textPlansStatus.setText(PlansCloud.status(requireContext()));
+        view.<Button>findViewById(R.id.btnPlansFromHelper).setOnClickListener(v -> plansFromHelper());
+        view.<Button>findViewById(R.id.btnPlansSync).setOnClickListener(v -> {
+            PlansCloud.setBot(requireContext(), editPlansToken.getText().toString(),
+                    editPlansChat.getText().toString());
+            syncPlans();
+        });
+
         btnCheckUpdates.setOnClickListener(v -> {
             textUpdateStatus.setText(R.string.update_checking);
             AppUpdates.check(requireActivity(), false, textUpdateStatus);
@@ -84,6 +101,32 @@ public class ImpostazioniFragment extends Fragment {
             textUpdateStatus.setText(AppUpdates.lastCheck(requireContext()));
         }
         fillSiteFields();
+    }
+
+    /** Piani condivisi con Windows: bot Telegram preso dall'Helper. */
+    private void plansFromHelper() {
+        if (adb == null || !adb.isConnected()) {
+            textPlansStatus.setText(R.string.conn_status_fail);
+            return;
+        }
+        textPlansStatus.setText(R.string.plans_bot_fetching);
+        PlansCloud.fetchFromHelper(requireContext(), adb, (ok, msg) -> runUi(() -> {
+            textPlansStatus.setText(msg);
+            if (!ok) return;
+            editPlansToken.setText(PlansCloud.token(requireContext()));
+            editPlansChat.setText(PlansCloud.chat(requireContext()));
+            syncPlans();
+        }));
+    }
+
+    private void syncPlans() {
+        textPlansStatus.setText(R.string.plans_syncing);
+        PlansCloud.sync(requireContext(), adb, () -> runUi(() ->
+                textPlansStatus.setText(PlansCloud.status(requireContext()))));
+    }
+
+    private void runUi(Runnable r) {
+        if (isAdded()) requireActivity().runOnUiThread(r);
     }
 
     /** IP e porte del Pi: tutte qui (Connessioni, Anteprima e Schermo le leggono). */

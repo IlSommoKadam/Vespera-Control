@@ -5,9 +5,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.CheckBox;
-import android.widget.Button;
 import android.widget.CompoundButton;
-import android.widget.EditText;
 import android.widget.GridLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -18,7 +16,6 @@ import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 
 import com.vaonis.vesperacontrol.AdbBridgeHolder;
-import com.vaonis.vesperacontrol.PlansCloud;
 import com.vaonis.vesperacontrol.R;
 import com.vaonis.vesperacontrol.TelegramFlags;
 import com.vaonis.vesperacontrol.adb.AdbBridge;
@@ -38,9 +35,6 @@ public class NotificheFragment extends Fragment implements TabRefreshable {
     private AdbBridge adb;
     private boolean binding;
     private boolean configured;
-    private EditText editPlansToken;
-    private EditText editPlansChat;
-    private TextView textPlansStatus;
 
     @Nullable
     @Override
@@ -57,19 +51,6 @@ public class NotificheFragment extends Fragment implements TabRefreshable {
         textStatus = view.findViewById(R.id.textTelegramStatus);
         checkEnabled = view.findViewById(R.id.checkTelegramEnabled);
         checkEnabled.setOnCheckedChangeListener(this::onToggleAll);
-
-        editPlansToken = view.findViewById(R.id.editPlansToken);
-        editPlansChat = view.findViewById(R.id.editPlansChat);
-        textPlansStatus = view.findViewById(R.id.textPlansStatus);
-        editPlansToken.setText(PlansCloud.token(requireContext()));
-        editPlansChat.setText(PlansCloud.chat(requireContext()));
-        textPlansStatus.setText(PlansCloud.status(requireContext()));
-        view.<Button>findViewById(R.id.btnPlansFromHelper).setOnClickListener(v -> plansFromHelper());
-        view.<Button>findViewById(R.id.btnPlansSync).setOnClickListener(v -> {
-            PlansCloud.setBot(requireContext(), editPlansToken.getText().toString(),
-                    editPlansChat.getText().toString());
-            syncPlans();
-        });
 
         GridLayout grid = view.findViewById(R.id.gridTelegramEvents);
         eventChecks.clear();
@@ -100,27 +81,6 @@ public class NotificheFragment extends Fragment implements TabRefreshable {
         if (adb != null) {
             refresh();
         }
-    }
-
-    private void plansFromHelper() {
-        if (adb == null || !adb.isConnected()) {
-            textPlansStatus.setText(R.string.conn_status_fail);
-            return;
-        }
-        textPlansStatus.setText(R.string.plans_bot_fetching);
-        PlansCloud.fetchFromHelper(requireContext(), adb, (ok, msg) -> postUi(() -> {
-            textPlansStatus.setText(msg);
-            if (!ok) return;
-            editPlansToken.setText(PlansCloud.token(requireContext()));
-            editPlansChat.setText(PlansCloud.chat(requireContext()));
-            syncPlans();
-        }));
-    }
-
-    private void syncPlans() {
-        textPlansStatus.setText(R.string.plans_syncing);
-        PlansCloud.sync(requireContext(), adb, () -> postUi(() ->
-                textPlansStatus.setText(PlansCloud.status(requireContext()))));
     }
 
     /** Interruttore generale: accende o spegne tutti gli avvisi. */
