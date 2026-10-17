@@ -597,9 +597,10 @@ class App(tk.Tk):
 
         card = self._card(self.tab_conn, "Wi‑Fi Vespera / Singularity")
         ttk.Label(card, textvariable=self.wifi_status, style="Card.TLabel").pack(anchor="w")
-        # Barre di stato come nella UI di Vespera Helper: strumento Wi‑Fi + Singularity.
+        # Codice colori + barre come in Vespera Helper.
+        self._build_conn_legend(card)
         self.vespera_bar = self._status_bar(card)
-        self.vespera_bar.pack(fill="x", pady=(8, 0))
+        self.vespera_bar.pack(fill="x", pady=(4, 0))
         ttk.Label(card, text="Singularity → strumento", style="Section.TLabel").pack(anchor="w", pady=(12, 0))
         ttk.Label(card, textvariable=self.sing_info, style="Card.TLabel").pack(anchor="w")
         self.sing_bar = self._status_bar(card)
@@ -607,7 +608,7 @@ class App(tk.Tk):
         self._paint_bars({})
         row = ttk.Frame(card, style="Card.TFrame")
         row.pack(fill="x", pady=(10, 0))
-        ttk.Button(row, text="Connetti Wi‑Fi", style="Primary.TButton", command=lambda: self.cmd("cmd|wifi|connect")).pack(
+        ttk.Button(row, text="Collega", style="Primary.TButton", command=lambda: self.cmd("cmd|wifi|connect")).pack(
             side="left", padx=(0, 6)
         )
         ttk.Button(row, text="Disconnetti", style="Danger.TButton", command=lambda: self.cmd("cmd|wifi|disconnect")).pack(
@@ -622,6 +623,30 @@ class App(tk.Tk):
             style="Warn.TButton",
             command=lambda: self.cmd("cmd|singularity|restart"),
         ).pack(side="left")
+
+    def _build_conn_legend(self, parent: ttk.Frame) -> None:
+        row = ttk.Frame(parent, style="Card.TFrame")
+        row.pack(fill="x", pady=(8, 0))
+        chips = (
+            ("○ offline", istatus.STEEL),
+            ("● rilevato", istatus.AMBER),
+            ("✓ connesso", istatus.GREEN),
+        )
+        for i, (label, color) in enumerate(chips):
+            chip = tk.Label(
+                row,
+                text=label,
+                justify="center",
+                anchor="center",
+                font=("Segoe UI", 9),
+                relief="sunken",
+                bd=1,
+                padx=8,
+                pady=3,
+                bg=color,
+                fg=istatus.text_on(color),
+            )
+            chip.pack(side="left", fill="x", expand=True, padx=(0, 6 if i < len(chips) - 1 else 0))
 
     def _status_bar(self, parent: ttk.Frame) -> tk.Label:
         return tk.Label(
@@ -2410,6 +2435,36 @@ class App(tk.Tk):
             return
         messagebox.showerror(f"{label}: non riuscito", tel_error_text(ack), parent=self)
 
+    @staticmethod
+    def _cmd_busy_label(line: str) -> str:
+        if line.startswith("cmd|wifi|connect"):
+            return "Collegamento al Vespera in corso…"
+        if line.startswith("cmd|wifi|disconnect"):
+            return "Disconnessione Wi‑Fi in corso…"
+        if line.startswith("cmd|wifi|scan"):
+            return "Scansione AP in corso…"
+        if line.startswith("cmd|singularity|restart"):
+            return "Riavvio Singularity in corso…"
+        if line.startswith("cmd|hd|"):
+            return f"Hard disk: {line.split('|')[2] if '|' in line else 'comando'}…"
+        if line.startswith("cmd|sync|"):
+            return "Sincronizzazione in corso…"
+        return f"Invio {line}…"
+
+    @staticmethod
+    def _cmd_done_label(line: str, ack: str) -> str:
+        if line.startswith("cmd|wifi|scan") and "|wifi|scan|[" in (ack or ""):
+            n = (ack or "").count('"ssid"')
+            head = f"Scan AP: trovati {n} Vespera" if n else "Scan AP: nessun Vespera in radio"
+            return f"{head} · {ack}"
+        if line.startswith("cmd|wifi|connect"):
+            return f"Collegamento avviato sul Pi · {ack}"
+        if line.startswith("cmd|wifi|disconnect"):
+            return f"Disconnessione inviata · {ack}"
+        if line.startswith("cmd|singularity|restart"):
+            return f"Riavvio Singularity richiesto · {ack}"
+        return ack or "—"
+
     def cmd(self, line: str, wait: float = 40) -> None:
         def job() -> None:
             bridge = self.ensure_bridge()
@@ -2417,7 +2472,8 @@ class App(tk.Tk):
                 bridge.connect()
             except AdbError:
                 pass
-            self.queue.put(("status", f"Invio {line}…", "info"))
+            busy_msg = self._cmd_busy_label(line)
+            self.queue.put(("status", busy_msg, "info"))
             self.queue.put(("log", f"> {line}"))
             tel_action = ""
             if line.startswith("cmd|telescope|") and not line.startswith("cmd|telescope|observe"):
@@ -2430,7 +2486,7 @@ class App(tk.Tk):
                 raise
             self.queue.put(("log", ack))
             kind = "ok" if ack.startswith("OK|") else "err"
-            self.queue.put(("status", ack[:120], kind))
+            self.queue.put(("status", self._cmd_done_label(line, ack)[:160], kind))
             if tel_action:
                 self.queue.put(("tel_done", tel_action, kind == "ok", ack))
             if line.startswith("cmd|plan|load"):
