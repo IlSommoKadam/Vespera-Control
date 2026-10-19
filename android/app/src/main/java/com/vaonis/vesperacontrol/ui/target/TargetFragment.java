@@ -2,7 +2,9 @@ package com.vaonis.vesperacontrol.ui.target;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -10,7 +12,9 @@ import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.style.DynamicDrawableSpan;
+import android.text.style.ForegroundColorSpan;
 import android.text.style.ImageSpan;
+import android.text.style.StyleSpan;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -21,6 +25,7 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -30,6 +35,7 @@ import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 
+import com.google.android.material.tabs.TabLayout;
 import com.vaonis.vesperacontrol.AdbBridgeHolder;
 import com.vaonis.vesperacontrol.DevicePrefs;
 import com.vaonis.vesperacontrol.Favorites;
@@ -41,6 +47,7 @@ import com.vaonis.vesperacontrol.catalog.NightSky;
 import com.vaonis.vesperacontrol.catalog.SkyCatalog;
 import com.vaonis.vesperacontrol.catalog.SkySearch;
 import com.vaonis.vesperacontrol.ui.TabRefreshable;
+import com.vaonis.vesperacontrol.ui.telescopio.TelescopioFragment;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -74,6 +81,11 @@ public class TargetFragment extends Fragment implements TabRefreshable {
     private TextView textFavStatus;
     private LinearLayout listFavorites;
     private ScrollView scroll;
+    private TabLayout targetSubTabs;
+    private View panelActivePlan;
+    private View panelSearch;
+    private TextView textPlanProgress;
+    private ProgressBar barPlanProgress;
     /** Sera della notte scelta per i preferiti; null = stanotte. */
     private LocalDate favNight;
     private final AtomicInteger favGen = new AtomicInteger();
@@ -128,6 +140,11 @@ public class TargetFragment extends Fragment implements TabRefreshable {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         adb = AdbBridgeHolder.get(requireContext());
+        targetSubTabs = view.findViewById(R.id.targetSubTabs);
+        panelActivePlan = view.findViewById(R.id.panelActivePlan);
+        panelSearch = view.findViewById(R.id.panelSearch);
+        textPlanProgress = view.findViewById(R.id.textPlanProgress);
+        barPlanProgress = view.findViewById(R.id.barPlanProgress);
         editQuery = view.findViewById(R.id.editObserveQuery);
         imagePreview = view.findViewById(R.id.imageObservePreview);
         textDetails = view.findViewById(R.id.textObserveDetails);
@@ -160,6 +177,7 @@ public class TargetFragment extends Fragment implements TabRefreshable {
         view.<Button>findViewById(R.id.btnPlanSend).setOnClickListener(v -> sendPlan());
         btnPlanDelete.setOnClickListener(v -> deletePlan());
         btnPlanCancel.setOnClickListener(v -> cancelHelperPlan());
+        setupSubTabs();
         showSavedPlans();
         view.<Button>findViewById(R.id.btnFavPrev).setOnClickListener(v -> shiftNight(-1));
         view.<Button>findViewById(R.id.btnFavNext).setOnClickListener(v -> shiftNight(1));
@@ -179,6 +197,76 @@ public class TargetFragment extends Fragment implements TabRefreshable {
         btnContinue.setOnClickListener(v -> startObserve(true));
         refreshVisibility();
         refreshFavorites();
+    }
+
+    private void setupSubTabs() {
+        if (targetSubTabs == null) return;
+        targetSubTabs.removeAllTabs();
+        targetSubTabs.addTab(targetSubTabs.newTab().setText(R.string.target_sub_active));
+        targetSubTabs.addTab(targetSubTabs.newTab().setText(R.string.target_sub_search));
+        targetSubTabs.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
+            @Override public void onTabSelected(TabLayout.Tab tab) {
+                showSubTab(tab.getPosition());
+                styleSubTabs();
+            }
+            @Override public void onTabUnselected(TabLayout.Tab tab) {
+                styleSubTabs();
+            }
+            @Override public void onTabReselected(TabLayout.Tab tab) {}
+        });
+        showSubTab(0);
+        targetSubTabs.post(this::styleSubTabs);
+    }
+
+    private void showSubTab(int index) {
+        boolean search = index == 1;
+        if (panelActivePlan != null) panelActivePlan.setVisibility(search ? View.GONE : View.VISIBLE);
+        if (panelSearch != null) panelSearch.setVisibility(search ? View.VISIBLE : View.GONE);
+        if (scroll != null) scroll.scrollTo(0, 0);
+    }
+
+    private void selectSubTab(int index) {
+        if (targetSubTabs == null) return;
+        TabLayout.Tab tab = targetSubTabs.getTabAt(index);
+        if (tab != null && targetSubTabs.getSelectedTabPosition() != index) {
+            tab.select();
+        } else {
+            showSubTab(index);
+        }
+    }
+
+    /** Stesso stile segmentato dei tab principali (verde selezionata). */
+    private void styleSubTabs() {
+        if (targetSubTabs == null || !isAdded()) return;
+        float density = getResources().getDisplayMetrics().density;
+        int selected = ContextCompat.getColor(requireContext(), R.color.vespera_green);
+        int idle = ContextCompat.getColor(requireContext(), R.color.vespera_tab_idle);
+        int idleText = ContextCompat.getColor(requireContext(), R.color.vespera_tab_idle_text);
+        int white = ContextCompat.getColor(requireContext(), R.color.white);
+        if (!(targetSubTabs.getChildAt(0) instanceof ViewGroup)) return;
+        ViewGroup strip = (ViewGroup) targetSubTabs.getChildAt(0);
+        for (int i = 0; i < strip.getChildCount(); i++) {
+            View tabView = strip.getChildAt(i);
+            boolean on = targetSubTabs.getSelectedTabPosition() == i;
+            GradientDrawable face = new GradientDrawable();
+            face.setColor(on ? selected : idle);
+            face.setCornerRadius(6f * density);
+            tabView.setBackground(face);
+            paintTabText(tabView, on ? white : idleText);
+        }
+    }
+
+    private static void paintTabText(View view, int color) {
+        if (view instanceof TextView) {
+            ((TextView) view).setTextColor(color);
+            return;
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                paintTabText(group.getChildAt(i), color);
+            }
+        }
     }
 
     @Override
@@ -460,7 +548,9 @@ public class TargetFragment extends Fragment implements TabRefreshable {
 
     /** Osservazione in corso sul telescopio: tempo integrato = pose × esposizione. */
     static String currentObservationLine(@Nullable JSONObject tel) {
-        if (tel == null || !tel.optBoolean("reachable")) return "Osservazione corrente: telescopio non raggiungibile.";
+        if (tel == null || !tel.optBoolean("reachable")) {
+            return "Osservazione corrente: telescopio non raggiungibile.";
+        }
         boolean observing = tel.has("isObserving")
                 ? tel.optBoolean("isObserving")
                 : "RUNNING".equals(tel.optString("observationStatus"));
@@ -480,6 +570,122 @@ public class TargetFragment extends Fragment implements TabRefreshable {
             sb.append(" · ").append(stacks).append(" pose");
         }
         return sb.toString();
+    }
+
+    /**
+     * Stato reale del Vespera (stesso snapshot del tab Telescopio), senza prefisso.
+     * Usato nel piano Helper sotto il capoverso «Corrente».
+     */
+    static String vesperaLiveStatus(@Nullable JSONObject tel) {
+        if (tel == null) return "Stato Vespera non disponibile.";
+        if (!tel.optBoolean("reachable")) {
+            String err = tel.optString("error", "").trim();
+            return err.isEmpty() ? "Telescopio non raggiungibile." : "Non raggiungibile (" + err + ").";
+        }
+        boolean observing = tel.has("isObserving")
+                ? tel.optBoolean("isObserving")
+                : "RUNNING".equals(tel.optString("observationStatus"));
+        if (!observing) {
+            String status = tel.optString("observationStatus", "").trim();
+            if (status.isEmpty() || "IDLE".equalsIgnoreCase(status) || "NONE".equalsIgnoreCase(status)) {
+                return "Nessuna osservazione in corso.";
+            }
+            return "Nessuna osservazione · " + status;
+        }
+        String name = tel.optString("targetName", "").trim();
+        StringBuilder sb = new StringBuilder(name.isEmpty() ? "in corso" : name);
+        String op = tel.optString("operationType", "").trim();
+        String step = tel.optString("step", "").trim();
+        if (!op.isEmpty() || !step.isEmpty()) {
+            sb.append(" · ");
+            if (!op.isEmpty()) sb.append(op);
+            if (!step.isEmpty()) sb.append(op.isEmpty() ? step : "/" + step);
+        }
+        String tracking = tel.optString("tracking", "").trim();
+        if ("ON".equalsIgnoreCase(tracking)) sb.append(" · tracking on");
+        else if ("STARTING".equalsIgnoreCase(tracking)) sb.append(" · tracking in avvio");
+        int stacks = tel.optInt("stackingCount", 0);
+        long exp = tel.optLong("exposureMicroSec", 0);
+        if (stacks > 0 && exp > 0) {
+            long m = Math.round(stacks * (exp / 1_000_000.0) / 60.0);
+            String time = m < 60 ? m + " min"
+                    : m % 60 == 0 ? (m / 60) + "h" : String.format(Locale.ITALY, "%dh%02d", m / 60, m % 60);
+            sb.append(" · ").append(time).append(" integrati (")
+                    .append(stacks).append(String.format(Locale.ITALY, " pose da %.0f s)", exp / 1_000_000.0));
+        } else if (stacks > 0) {
+            sb.append(" · ").append(stacks).append(" pose");
+        }
+        JSONObject clock = tel.optJSONObject("trackingClock");
+        if (clock != null) {
+            long run = clock.optLong("runMs");
+            long tonight = clock.optLong("tonightMs");
+            String tname = clock.optString("target", "").trim();
+            if (run >= 60_000L || tonight >= 60_000L) {
+                sb.append("\nTracking: ");
+                if (!tname.isEmpty()) sb.append(tname).append(' ');
+                if (run >= 60_000L) sb.append("da ").append(minutes(run));
+                if (tonight >= 60_000L) {
+                    if (run >= 60_000L) sb.append(" · ");
+                    sb.append("stanotte ").append(minutes(tonight));
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Capoverso in neretto, poi il corpo (può avere più righe). */
+    private static void appendSection(SpannableStringBuilder sb, String title, @Nullable CharSequence body) {
+        if (sb.length() > 0) sb.append('\n');
+        int start = sb.length();
+        sb.append(title);
+        sb.setSpan(new StyleSpan(Typeface.BOLD), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        if (body != null && body.length() > 0) sb.append('\n').append(body);
+    }
+
+    private static void appendBold(SpannableStringBuilder sb, String text) {
+        int start = sb.length();
+        sb.append(text);
+        sb.setSpan(new StyleSpan(Typeface.BOLD), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
+    /** Righe «Tempo previsto»: oggetti strutturati o stringhe già formattate dall'Helper. */
+    static List<String> plannedTotalLines(@Nullable JSONArray totals) {
+        List<String> out = new ArrayList<>();
+        if (totals == null || totals.length() == 0) return out;
+        if (totals.optJSONObject(0) != null) return NightSky.totalsText(totals);
+        for (int i = 0; i < totals.length(); i++) {
+            String s = totals.optString(i, "").trim();
+            if (!s.isEmpty()) out.add(s);
+        }
+        return out;
+    }
+
+    /**
+     * Spezza ogni totale su più righe: nome in neretto, poi durata / visibilità / meteo / altezza.
+     * Evita il muro di testo con i « · » tutti sulla stessa riga.
+     */
+    static void appendPlannedTotals(SpannableStringBuilder sb, @Nullable JSONArray totals) {
+        List<String> lines = plannedTotalLines(totals);
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            String[] parts = line.split(" · ", -1);
+            if (parts.length == 0) continue;
+            if (i > 0) sb.append('\n');
+            sb.append('\n');
+            appendBold(sb, parts[0].trim());
+            for (int p = 1; p < parts.length; p++) {
+                String part = parts[p].trim();
+                if (!part.isEmpty()) sb.append("\n   ").append(part);
+            }
+        }
+    }
+
+    /** Messaggio piano Helper: ignora «stato non disponibile» se il telescopio risponde già. */
+    static String planMessageForUi(String msg, @Nullable JSONObject tel) {
+        if (msg == null || msg.isEmpty() || msg.startsWith("Errore su ")) return "";
+        String low = msg.toLowerCase(Locale.ITALY);
+        if (low.contains("non disponibile") && tel != null && tel.optBoolean("reachable")) return "";
+        return readablePlanError(msg);
     }
 
     private void refreshVisibility() {
@@ -845,7 +1051,7 @@ public class TargetFragment extends Fragment implements TabRefreshable {
             sb.append(clock.format(java.time.Instant.ofEpochMilli(p.optLong("start")).atZone(zone)))
                     .append("–")
                     .append(clock.format(java.time.Instant.ofEpochMilli(p.optLong("end")).atZone(zone)))
-                    .append("   ");
+                    .append("\n"); // una riga per l'ora, una per il meteo
             JSONObject sky = p.optJSONObject("sky");
             String kind = sky == null ? "" : sky.optString("kind");
             int at = sb.length();
@@ -884,6 +1090,8 @@ public class TargetFragment extends Fragment implements TabRefreshable {
                     TextView t = (TextView) super.getView(position, convertView, parent);
                     t.setTextColor(getResources().getColor(R.color.vespera_text, null));
                     t.setTextSize(14);
+                    t.setSingleLine(false); // oggetto e Luna su righe separate
+                    t.setMaxLines(3);
                     return t;
                 }
 
@@ -892,6 +1100,8 @@ public class TargetFragment extends Fragment implements TabRefreshable {
                     TextView t = (TextView) super.getDropDownView(position, convertView, parent);
                     t.setTextColor(getResources().getColor(R.color.vespera_text, null));
                     t.setBackgroundColor(getResources().getColor(R.color.vespera_surface, null));
+                    t.setSingleLine(false);
+                    t.setMaxLines(3);
                     t.setPadding((int) (12 * density), (int) (10 * density), (int) (12 * density), (int) (10 * density));
                     return t;
                 }
@@ -1044,11 +1254,54 @@ public class TargetFragment extends Fragment implements TabRefreshable {
             return;
         }
         textPlanHelper.setText("Invio del piano all'Helper…");
+        selectSubTab(0);
         adb.sendLine("cmd|plan|load|" + json, (ok, msg) -> postUi(() -> {
             textPlanHelper.setText(ok ? "Piano caricato sull'Helper: parte da solo agli orari."
                     : "Piano non caricato: " + msg
                     + (msg != null && msg.contains("unknown") ? " (aggiorna Vespera Helper ≥ 0.8.23)" : ""));
-            if (ok) refreshStatus();
+            if (ok) {
+                refreshStatus();
+                askInitAfterPlan();
+            }
+        }));
+    }
+
+    /** Piano caricato e telescopio non ancora inizializzato: propone l'Init (come il tab Telescopio). */
+    private void askInitAfterPlan() {
+        if (!isAdded() || !TelescopioFragment.allowedTelActions(lastTelescopeJson).contains("init")) return;
+        new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                .setTitle("Inizializzare il telescopio?")
+                .setMessage("Il piano è caricato ma il telescopio non è ancora inizializzato.\n\n"
+                        + "Init: apertura braccio, calibrazione e puntamento iniziale. Farlo adesso?")
+                .setNegativeButton("Non ora", null)
+                .setPositiveButton("Init", (d, w) -> sendInit())
+                .show();
+    }
+
+    private void sendInit() {
+        if (adb == null || !adb.isConnected()) return;
+        String line = "cmd|telescope|init";
+        if (DevicePrefs.hasSite(requireContext())) {
+            try {
+                JSONObject site = new JSONObject();
+                site.put("lat", DevicePrefs.getLat(requireContext()));
+                site.put("lon", DevicePrefs.getLon(requireContext()));
+                line += "|" + site;
+            } catch (Exception ignored) {
+            }
+        }
+        textPlanHelper.setText("Init del telescopio in corso…");
+        adb.sendLine(line, 150_000L, (ok, msg) -> postUi(() -> {
+            textPlanHelper.setText(ok ? "Init: comando accettato dal telescopio."
+                    : "Init non riuscito: " + msg);
+            if (!ok) {
+                new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                        .setTitle("Init: non riuscito")
+                        .setMessage(TelescopioFragment.telescopeErrorText(msg))
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
+            }
+            refreshStatus();
         }));
     }
 
@@ -1064,46 +1317,97 @@ public class TargetFragment extends Fragment implements TabRefreshable {
     private void showHelperPlan(JSONObject root) {
         if (textPlanHelper == null) return;
         JSONObject plan = root.optJSONObject("plan");
+        JSONObject tel = root.optJSONObject("telescope");
+        if (lastTelescopeJson == null) lastTelescopeJson = tel;
         if (plan == null) {
-            textPlanHelper.setText("L'Helper non gestisce i piani: aggiorna Vespera Helper (≥ 0.8.23).");
+            setPlanProgress(null, 0);
+            textPlanHelper.setText(mutedSpan(
+                    "L'Helper non gestisce i piani: aggiorna Vespera Helper (≥ 0.8.23)."));
             btnPlanCancel.setVisibility(View.GONE);
             return;
         }
         JSONArray steps = plan.optJSONArray("steps");
         if (steps == null || steps.length() == 0) {
+            setPlanProgress(null, 0);
             String msg = plan.optString("message", "");
-            textPlanHelper.setText("Helper: nessun piano" + (msg.isEmpty() ? "" : " · " + msg));
+            textPlanHelper.setText(mutedSpan(
+                    "Helper: nessun piano" + (msg.isEmpty() ? "" : " · " + msg)));
             btnPlanCancel.setVisibility(View.GONE);
             return;
         }
-        android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder("Helper: ")
-                .append(plan.optString("title")).append(" · ");
-        // Stato del piano (e messaggio) in neretto
-        int boldStart = sb.length();
-        sb.append(plan.optBoolean("done") ? "terminato" : "attivo");
-        String msg = plan.optString("message", "");
-        // "Errore su X: ..." è già nella riga del passo, non ripeterlo
-        if (!msg.isEmpty() && !msg.startsWith("Errore su ")) sb.append("\n").append(readablePlanError(msg));
-        sb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), boldStart, sb.length(),
-                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        long now = System.currentTimeMillis();
+        boolean done = plan.optBoolean("done");
+        int totalPct = planProgressPercent(steps, now, done);
+        setPlanProgress(plan, totalPct);
+
+        int cTitle = themeColor(R.color.vespera_title);
+        int cText = themeColor(R.color.vespera_text);
+        int cMuted = themeColor(R.color.vespera_muted);
+        int cGreen = themeColor(R.color.vespera_green);
+        int cAccent = themeColor(R.color.vespera_accent);
+        int cRose = themeColor(R.color.vespera_rose);
+        int cAmber = themeColor(R.color.vespera_amber);
+        int cSecondary = themeColor(R.color.vespera_text_secondary);
+
+        SpannableStringBuilder sb = new SpannableStringBuilder();
+        appendColoredSection(sb, "Piano", null, cTitle);
+        sb.append('\n');
+        appendColored(sb, plan.optString("title"), cText, true);
+        sb.append("  ·  ");
+        if (done) appendColored(sb, "terminato", cMuted, true);
+        else appendColored(sb, "attivo", cGreen, true);
+        sb.append("  ·  ");
+        appendColored(sb, totalPct + "%", progressTone(totalPct, cAmber, cAccent, cGreen), true);
+
+        StringBuilder currentBody = new StringBuilder(vesperaLiveStatus(tel != null ? tel : lastTelescopeJson));
+        String planMsg = planMessageForUi(plan.optString("message", ""), tel != null ? tel : lastTelescopeJson);
+        if (!planMsg.isEmpty()) currentBody.append('\n').append(planMsg);
+        appendColoredSection(sb, "Corrente", currentBody, cAccent);
+
+        appendColoredSection(sb, "Passi del piano", null, cTitle);
         int current = plan.optInt("current", -1);
         java.time.format.DateTimeFormatter clock = java.time.format.DateTimeFormatter.ofPattern("HH:mm");
         for (int i = 0; i < steps.length(); i++) {
             JSONObject s = steps.optJSONObject(i);
             if (s == null) continue;
+            int stepPct;
+            if (done || (current >= 0 && i < current)) stepPct = 100;
+            else if (current >= 0 && i > current) stepPct = 0;
+            else stepPct = stepProgressPercent(s, now);
+            boolean isCurrent = i == current && !done;
+            boolean isDone = done || (current >= 0 && i < current);
+            int lineColor = isCurrent ? cGreen : (isDone ? cMuted : cSecondary);
+
+            sb.append("\n\n");
+            int lineStart = sb.length();
+            appendBold(sb, String.valueOf(i + 1));
+            sb.append(isCurrent ? " ▶ " : " · ");
             String from = clock.format(java.time.Instant.ofEpochMilli(s.optLong("start"))
                     .atZone(java.time.ZoneId.systemDefault()));
             String to = clock.format(java.time.Instant.ofEpochMilli(s.optLong("end"))
                     .atZone(java.time.ZoneId.systemDefault()));
-            sb.append("\n").append(i == current ? "▶ " : "   ").append(from).append("–").append(to)
-                    .append("  ").append(s.optString("name"));
+            sb.append(from).append('–').append(to).append("  ").append(s.optString("name"));
+            colorRange(sb, lineStart, sb.length(), lineColor, isCurrent);
+            sb.append("  ·  ");
+            appendColored(sb, getString(R.string.plan_progress_step, stepPct),
+                    progressTone(stepPct, cAmber, cAccent, cGreen), true);
+
             String st = readablePlanError(s.optString("status", ""));
-            if (st.startsWith("errore")) sb.append("\n      ⚠ ").append(st);
-            else if (!st.isEmpty()) sb.append(" · ").append(st);
+            if (st.startsWith("errore")) {
+                sb.append('\n');
+                appendColored(sb, "      ⚠ " + st, cRose, false);
+            } else if (!st.isEmpty()) {
+                sb.append('\n');
+                appendColored(sb, "      " + st, cMuted, false);
+            }
             long tracked = s.optLong("trackedMs");
-            if (tracked >= 60_000L) sb.append(" · tracking ").append(minutes(tracked));
+            if (tracked >= 60_000L) {
+                sb.append('\n');
+                appendColored(sb, "      tracking " + minutes(tracked), cMuted, false);
+            }
         }
-        // Tracking reale misurato dall'Helper (≥ 0.8.47): per oggetto somma dei suoi passi, poi il piano
+
+        // Tracking reale misurato dall'Helper (≥ 0.8.47): storico per oggetto, poi totale
         java.util.LinkedHashMap<String, Long> byName = new java.util.LinkedHashMap<>();
         long all = 0;
         for (int i = 0; i < steps.length(); i++) {
@@ -1114,19 +1418,120 @@ public class TargetFragment extends Fragment implements TabRefreshable {
             all += s.optLong("trackedMs");
         }
         if (all >= 60_000L) {
-            sb.append("\nTracking reale (somma dei passi):");
+            SpannableStringBuilder hist = new SpannableStringBuilder();
             for (java.util.Map.Entry<String, Long> e : byName.entrySet()) {
-                sb.append("\n   ").append(e.getKey()).append(" · ").append(minutes(e.getValue()));
+                if (hist.length() > 0) hist.append('\n');
+                appendColored(hist, e.getKey(), cText, true);
+                hist.append("  ·  ");
+                appendColored(hist, minutes(e.getValue()), cAccent, false);
             }
-            sb.append("\n   Totale piano ").append(minutes(all));
+            hist.append("\n\n");
+            appendColored(hist, "Totale piano ", cTitle, true);
+            appendColored(hist, minutes(all), cGreen, true);
+            appendColoredSection(sb, "Storico tracking", hist, cTitle);
         }
         JSONArray totals = plan.optJSONArray("totals");
         if (totals != null && totals.length() > 0) {
-            sb.append("\nTempo per oggetto:");
-            for (int i = 0; i < totals.length(); i++) sb.append("\n   ").append(totals.optString(i));
+            appendColoredSection(sb, "Tempo previsto", null, cTitle);
+            appendPlannedTotals(sb, totals);
         }
         textPlanHelper.setText(sb);
         btnPlanCancel.setVisibility(plan.optBoolean("active") ? View.VISIBLE : View.GONE);
+    }
+
+    private int themeColor(int colorRes) {
+        return ContextCompat.getColor(requireContext(), colorRes);
+    }
+
+    private static int progressTone(int pct, int low, int mid, int high) {
+        if (pct >= 70) return high;
+        if (pct >= 30) return mid;
+        return low;
+    }
+
+    private CharSequence mutedSpan(String text) {
+        SpannableStringBuilder sb = new SpannableStringBuilder(text);
+        sb.setSpan(new ForegroundColorSpan(themeColor(R.color.vespera_muted)),
+                0, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return sb;
+    }
+
+    /** Sezione con riga vuota sopra e titolo colorato (tema Vespera). */
+    private static void appendColoredSection(SpannableStringBuilder sb, String title,
+                                             @Nullable CharSequence body, int titleColor) {
+        if (sb.length() > 0) sb.append("\n\n");
+        int start = sb.length();
+        sb.append(title);
+        sb.setSpan(new StyleSpan(Typeface.BOLD), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.setSpan(new ForegroundColorSpan(titleColor), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        if (body != null && body.length() > 0) sb.append('\n').append(body);
+    }
+
+    private static void appendColored(SpannableStringBuilder sb, String text, int color, boolean bold) {
+        int start = sb.length();
+        sb.append(text);
+        colorRange(sb, start, sb.length(), color, bold);
+    }
+
+    private static void colorRange(SpannableStringBuilder sb, int start, int end, int color, boolean bold) {
+        if (start >= end) return;
+        sb.setSpan(new ForegroundColorSpan(color), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        if (bold) sb.setSpan(new StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
+    private void setPlanProgress(@Nullable JSONObject plan, int pct) {
+        boolean show = plan != null;
+        pct = Math.max(0, Math.min(100, pct));
+        if (textPlanProgress != null) {
+            textPlanProgress.setVisibility(show ? View.VISIBLE : View.GONE);
+            if (show) {
+                textPlanProgress.setText(getString(R.string.plan_progress_total, pct));
+                textPlanProgress.setTextColor(progressTone(pct,
+                        themeColor(R.color.vespera_amber),
+                        themeColor(R.color.vespera_accent),
+                        themeColor(R.color.vespera_green)));
+            }
+        }
+        if (barPlanProgress != null) {
+            barPlanProgress.setVisibility(show ? View.VISIBLE : View.GONE);
+            if (show) {
+                barPlanProgress.setProgress(pct);
+                int tone = progressTone(pct,
+                        themeColor(R.color.vespera_amber),
+                        themeColor(R.color.vespera_accent),
+                        themeColor(R.color.vespera_green));
+                barPlanProgress.setProgressTintList(android.content.res.ColorStateList.valueOf(tone));
+            }
+        }
+    }
+
+    /** Percentuale sul calendario del piano (0–100), o 100 se terminato. */
+    static int planProgressPercent(@Nullable JSONArray steps, long nowMs, boolean done) {
+        if (done) return 100;
+        if (steps == null || steps.length() == 0) return 0;
+        long start = Long.MAX_VALUE;
+        long end = Long.MIN_VALUE;
+        for (int i = 0; i < steps.length(); i++) {
+            JSONObject s = steps.optJSONObject(i);
+            if (s == null) continue;
+            start = Math.min(start, s.optLong("start"));
+            end = Math.max(end, s.optLong("end"));
+        }
+        if (start == Long.MAX_VALUE || end <= start) return 0;
+        if (nowMs <= start) return 0;
+        if (nowMs >= end) return 100;
+        return (int) Math.round(100.0 * (nowMs - start) / (end - start));
+    }
+
+    /** Percentuale di un singolo passo rispetto alla sua finestra oraria. */
+    static int stepProgressPercent(@Nullable JSONObject step, long nowMs) {
+        if (step == null) return 0;
+        long start = step.optLong("start");
+        long end = step.optLong("end");
+        if (end <= start) return 0;
+        if (nowMs <= start) return 0;
+        if (nowMs >= end) return 100;
+        return (int) Math.round(100.0 * (nowMs - start) / (end - start));
     }
 
     /** "40 min", "1h20" (come l'Helper). */
@@ -1211,10 +1616,12 @@ public class TargetFragment extends Fragment implements TabRefreshable {
         }
         showPlan(plan, true);
         refreshFavorites();
+        selectSubTab(1);
     }
 
     private void openFavorite(NightSky.Rank rank) {
         if (searchBusy) return;
+        selectSubTab(1);
         editQuery.setText(rank.name);
         clearObserve();
         loadHit(new SkyCatalog.Hit(rank.name, rank.typeCode, rank.raDeg, rank.decDeg));

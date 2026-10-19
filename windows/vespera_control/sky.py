@@ -720,6 +720,74 @@ def sun_ra_dec(utc: datetime) -> tuple[float, float]:
     return ra, dec
 
 
+def moon_ra_dec(utc: datetime) -> tuple[float, float]:
+    """RA/Dec geocentrici della Luna in gradi (serie ridotta di Meeus, ~0,3°)."""
+    d = utc.timestamp() / 86400.0 + 2440587.5 - 2451545.0
+    L = 218.316 + 13.176396 * d
+    M = math.radians(134.963 + 13.064993 * d)
+    F = math.radians(93.272 + 13.229350 * d)
+    D = math.radians(297.850 + 12.190749 * d)
+    Ms = math.radians(357.529 + 0.98560028 * d)
+    lam = math.radians(L + 6.289 * math.sin(M) - 1.274 * math.sin(2 * D - M) + 0.658 * math.sin(2 * D)
+                       + 0.214 * math.sin(2 * M) - 0.186 * math.sin(Ms) - 0.114 * math.sin(2 * F))
+    beta = math.radians(5.128 * math.sin(F) + 0.281 * math.sin(M + F) + 0.278 * math.sin(M - F)
+                        + 0.173 * math.sin(2 * D - F))
+    eps = math.radians(23.439 - 0.0000004 * d)
+    ra = math.degrees(math.atan2(math.sin(lam) * math.cos(eps) - math.tan(beta) * math.sin(eps),
+                                 math.cos(lam))) % 360
+    dec = math.degrees(math.asin(math.sin(beta) * math.cos(eps)
+                                 + math.cos(beta) * math.sin(eps) * math.sin(lam)))
+    return ra, dec
+
+
+def separation(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
+    """Distanza angolare in gradi fra due punti del cielo."""
+    a, b = math.radians(dec1), math.radians(dec2)
+    c = math.sin(a) * math.sin(b) + math.cos(a) * math.cos(b) * math.cos(math.radians(ra1 - ra2))
+    return math.degrees(math.acos(max(-1.0, min(1.0, c))))
+
+
+@dataclass
+class Moon:
+    ra: float
+    dec: float
+    alt: float
+    illum: float   # frazione illuminata 0..1
+    waxing: bool
+
+
+def moon_at(lat: float, lon: float, utc: datetime) -> Moon:
+    ra, dec = moon_ra_dec(utc)
+    sra, sdec = sun_ra_dec(utc)
+    illum = (1 - math.cos(math.radians(separation(ra, dec, sra, sdec)))) / 2
+    waxing = (ra - sra) % 360 < 180
+    return Moon(ra, dec, alt_az(lat, lon, ra, dec, utc)[0], illum, waxing)
+
+
+# Disturbo della Luna: fase × altezza (piena da 20°) × vicinanza all'oggetto.
+MOON_GREAT_MAX = 0.15   # sotto: non disturba
+MOON_GOOD_MAX = 0.6     # sotto: buona, sopra: scarsa (la Luna da sola non rende mai "non visibile")
+MOON_WEIGHT = 30.0      # peso nella proposta automatica del piano (in gradi di altezza media)
+
+
+def moon_impact(moon: Moon, ra: float | None = None, dec: float | None = None) -> float:
+    """0 = nessun disturbo; ~1 = Luna piena alta; fino a 1,3 se è vicina all'oggetto."""
+    if moon.alt <= 0 or moon.illum < 0.03:
+        return 0.0
+    impact = moon.illum * min(1.0, moon.alt / 20.0)
+    if ra is not None and dec is not None:
+        impact *= max(0.4, min(1.3, 1.5 - separation(moon.ra, moon.dec, ra, dec) / 90.0))
+    return impact
+
+
+def moon_level(impact: float) -> int:
+    if impact < MOON_GREAT_MAX:
+        return GREAT
+    if impact < MOON_GOOD_MAX:
+        return GOOD
+    return POOR
+
+
 def _weather_level(cloud: int, pop: int) -> int:
     if pop >= 50 or cloud >= 80:
         return NOT_VISIBLE
@@ -807,7 +875,9 @@ def report(lat: float, lon: float, object_name: str | None = None,
     start = now.replace(hour=12, minute=0, second=0, microsecond=0)
     if now < start:
         start -= timedelta(days=1)
-    slots: list[tuple] = []  # (ora, livello meteo, livello altezza, (nubi %, pioggia %) o None)
+    # (ora, livello meteo, livello altezza, (nubi %, pioggia %) o None,
+    #  livello luna, Moon, disturbo luna, distanza Luna-oggetto ° o None)
+    slots: list[tuple] = []
     max_alt = -90.0
     for _attempt in range(2):
         slots, max_alt = [], -90.0
@@ -825,7 +895,10 @@ def report(lat: float, lon: float, object_name: str | None = None,
                     alt = alt_az(lat, lon, ra, dec, utc)[0]
                     max_alt = max(max_alt, alt)
                     high = _altitude_level(alt)
-                slots.append((cursor, sky, high, raw.get(hour)))
+                moon = moon_at(lat, lon, utc)
+                impact = moon_impact(moon, ra, dec) if has_object else moon_impact(moon)
+                sep = separation(moon.ra, moon.dec, ra, dec) if has_object else None
+                slots.append((cursor, sky, high, raw.get(hour), moon_level(impact), moon, impact, sep))
             cursor += timedelta(minutes=STEP_MIN)
         # Notte già finita (mattina): mostra la prossima.
         if slots and slots[-1][0] + timedelta(minutes=STEP_MIN) <= datetime.now():
@@ -838,9 +911,10 @@ def report(lat: float, lon: float, object_name: str | None = None,
         return [(NONE, "Stanotte il cielo non diventa abbastanza buio.")]
     end = slots[-1][0] + timedelta(minutes=STEP_MIN)
     lines.append((NONE, f"Notte {slots[0][0]:%H:%M}–{end:%H:%M}"))
+    lines.append(_moon_line(slots, has_object))
 
     def level(s):
-        return min(s[1], s[2])
+        return min(s[1], s[2], s[4])
 
     minutes = [0, 0, 0, 0]
     for s in slots:
@@ -876,8 +950,12 @@ def report(lat: float, lon: float, object_name: str | None = None,
         r = _ranges(slots, test)
         if not r:
             continue
-        # Solo cielo: la scarsa dipende sempre dal meteo, si dice subito perché
-        why = _weather_cause(slots, test) if not has_object and lv == POOR else ""
+        # Solo cielo: buona/scarsa dipendono da meteo o Luna, si dice subito perché
+        why = ""
+        if not has_object and lv in (GOOD, POOR):
+            why = ", ".join(p for p in (_weather_cause(slots, test) if lv == POOR else "",
+                                        _moon_cause(slots, lambda s, t=test: t(s) and s[4] <= s[1], False))
+                            if p)
         lines.append((lv, f"{LABELS[lv]}  {r}" + (f" · {why}" if why else "")))
 
     # Non visibile, due righe: meteo (arancione, è una previsione) e oggetto basso (rosso, è certo)
@@ -893,21 +971,58 @@ def report(lat: float, lon: float, object_name: str | None = None,
         lines.append((NOT_VISIBLE, f"Non visibile  {r} · oggetto sotto 15°"))
 
     if weather is None:
-        lines.append((NONE, "Meteo non raggiungibile: conta solo l'altezza dell'oggetto."))
-    elif has_object:
+        lines.append((NONE, "Meteo non raggiungibile: contano solo altezza dell'oggetto e Luna."))
+    if has_object:
         def by_clouds(s):
-            return s[1] < GOOD and s[1] <= s[2]
+            return weather is not None and s[1] < GOOD and s[1] <= min(s[2], s[4])
+
+        def by_moon(s):
+            return s[4] < GOOD and s[4] <= min(s[1], s[2])
 
         clouds = _ranges(slots, by_clouds)
-        low = _ranges(slots, lambda s: s[2] < GOOD and s[2] <= s[1])
-        if clouds or low:
+        low = _ranges(slots, lambda s: s[2] < GOOD and s[2] <= min(s[1], s[4]))
+        bright = _ranges(slots, by_moon)
+        if clouds or low or bright:
             lines.append((NONE, "Perché:"))
         if clouds:
             why = _weather_cause(slots, by_clouds)
             lines.append((NONE, f"  nuvole/pioggia  {clouds}" + (f" · {why}" if why else "")))
         if low:
             lines.append((NONE, f"  oggetto basso (sotto 30°)  {low}"))
+        if bright:
+            lines.append((NONE, f"  Luna  {bright} · {_moon_cause(slots, by_moon, True)}"))
     return lines
+
+
+def _moon_line(slots, has_object: bool) -> tuple[int, str]:
+    """'Luna 78% calante · sopra l'orizzonte 23:10–05:00 · fino a 40° dall'oggetto' con la faccina
+    del disturbo peggiore."""
+    mid = slots[len(slots) // 2][5]
+    pct = round(mid.illum * 100)
+    phase = "crescente" if mid.waxing else "calante"
+    if pct < 3:
+        return GREAT, f"Luna nuova ({pct}%): non disturba"
+    up = _ranges(slots, lambda s: s[5].alt > 0)
+    if not up:
+        return GREAT, f"Luna {pct}% {phase}: sotto l'orizzonte tutta la notte"
+    worst = min(s[4] for s in slots)
+    text = f"Luna {pct}% {phase} · sopra l'orizzonte {up}"
+    if has_object:
+        text += f" · distanza minima dall'oggetto {min(s[7] for s in slots if s[5].alt > 0):.0f}°"
+    return worst, text + ("" if worst < GREAT else " · non disturba")
+
+
+def _moon_cause(slots, test, near: bool) -> str:
+    """'luna 78% alta 45°' (con near: '…, a 25° dall'oggetto') sui quarti d'ora scelti; vuoto se
+    la Luna non c'entra."""
+    chosen = [s for s in slots if test(s) and s[4] < GREAT]
+    if not chosen:
+        return ""
+    s = max(chosen, key=lambda x: x[6])
+    text = f"luna {round(s[5].illum * 100)}% a {s[5].alt:.0f}° d'altezza"
+    if near and s[7] is not None:
+        text += f", a {s[7]:.0f}° dall'oggetto"
+    return text
 
 
 def _high_enough(slots) -> bool:
@@ -1038,7 +1153,7 @@ def rank(lat: float, lon: float, items: list[dict], night: date) -> tuple[str, b
     weather = _weather_cached(lat, lon)
     raw = _WEATHER_RAW.get((round(lat, 2), round(lon, 2)), {}) if weather is not None else {}
     start = datetime(night.year, night.month, night.day, 12, 0)
-    dark: list[tuple] = []  # (ora locale, UTC, livello meteo, (nubi %, pioggia %) o None)
+    dark: list[tuple] = []  # (ora locale, UTC, livello meteo, (nubi %, pioggia %) o None, Moon)
     seen = False
     cursor = start
     while cursor < start + timedelta(days=1):
@@ -1049,7 +1164,7 @@ def rank(lat: float, lon: float, items: list[dict], night: date) -> tuple[str, b
             v = weather.get(hour) if weather is not None else None
             if v is not None:
                 seen = True
-            dark.append((cursor, utc, GREAT if v is None else v, raw.get(hour)))
+            dark.append((cursor, utc, GREAT if v is None else v, raw.get(hour), moon_at(lat, lon, utc)))
         cursor += timedelta(minutes=STEP_MIN)
     if dark:
         night_line = f"Notte {dark[0][0]:%H:%M}–{dark[-1][0] + timedelta(minutes=STEP_MIN):%H:%M}"
@@ -1063,22 +1178,26 @@ def rank(lat: float, lon: float, items: list[dict], night: date) -> tuple[str, b
             continue
         slots = []
         max_alt = -90.0
-        for local, utc, sky_lv, sky_raw in dark:
+        for local, utc, sky_lv, sky_raw, moon in dark:
             alt = alt_az(lat, lon, ra, dec, utc)[0]
             max_alt = max(max_alt, alt)
-            slots.append((local, sky_lv, _altitude_level(alt), sky_raw))
+            slots.append((local, sky_lv, _altitude_level(alt), sky_raw, moon_level(moon_impact(moon, ra, dec))))
+
+        def level(s):
+            return min(s[1], s[2], s[4])
+
         minutes = [0, 0, 0, 0]
         for s in slots:
-            minutes[min(s[1], s[2])] += STEP_MIN
+            minutes[level(s)] += STEP_MIN
         best = NOT_VISIBLE
         for lv in (GREAT, GOOD, POOR):
             if minutes[lv] >= HEADLINE_MIN:
                 best = lv
                 break
-        ranges = "" if best == NOT_VISIBLE else _ranges(slots, lambda s, b=best: min(s[1], s[2]) == b)
+        ranges = "" if best == NOT_VISIBLE else _ranges(slots, lambda s, b=best: level(s) == b)
         blocked = best == NOT_VISIBLE and _high_enough(slots)
         reason = _weather_cause(
-            slots, lambda s: min(s[1], s[2]) == NOT_VISIBLE and s[2] > NOT_VISIBLE) if blocked else ""
+            slots, lambda s: level(s) == NOT_VISIBLE and s[2] > NOT_VISIBLE) if blocked else ""
         rows.append(Rank(
             str(item.get("name") or ""), str(item.get("type") or ""), ra, dec, best,
             minutes[GREAT] * 3 + minutes[GOOD] * 2 + minutes[POOR],
@@ -1120,13 +1239,33 @@ def sky_text(sky: dict | None) -> str:
     return f"{icon} {label} · nubi {sky.get('cloud', 0)}% · pioggia {sky.get('pop', 0)}%"
 
 
-def _period_score(a: list) -> float:
+def _period_score(a: list, moon: float = 0.0) -> float:
     """Punteggio di un oggetto in un periodo da [media, minima, massima] altezza:
-    la media, penalizzata se scende sotto 30°; -1000 se non sale mai a 15°."""
+    la media, penalizzata se scende sotto 30° e per il disturbo della Luna (fase, altezza e
+    distanza dall'oggetto); -1000 se non sale mai a 15°."""
     avg, low, high = a
     if high < 15:
         return -1000.0
-    return avg - 2.0 * max(0.0, 30.0 - low)
+    return avg - 2.0 * max(0.0, 30.0 - low) - MOON_WEIGHT * moon
+
+
+def _period_moon(p: dict, o: int) -> float:
+    """Disturbo medio della Luna per l'oggetto o nel periodo (0 se il piano non lo ha)."""
+    try:
+        return float(p["moon"]["impact"][o])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return 0.0
+
+
+def _moon_note(p: dict, o: int) -> str:
+    """' · ☾ 78% a 35°' se la Luna disturba l'oggetto nel periodo, altrimenti ''."""
+    moon = p.get("moon") or {}
+    if _period_moon(p, o) < MOON_GREAT_MAX:
+        return ""
+    try:
+        return f" · ☾ {int(moon['illum'])}% a {float(moon['sep'][o]):.0f}°"
+    except (KeyError, IndexError, TypeError, ValueError):
+        return " · ☾"
 
 
 PLAN_STATES_MAX = 5000
@@ -1137,7 +1276,7 @@ def plan_propose(plan: dict) -> None:
     1. più ore possibili: ogni periodo attivo con almeno un oggetto alto ne riceve uno visibile;
     2. più equa possibile: stesso numero di periodi per oggetto (minima somma dei quadrati);
     3. ore consecutive: meno cambi di oggetto possibile;
-    4. a parità, ogni oggetto nei periodi dove è più alto.
+    4. a parità, ogni oggetto nei periodi dove è più alto e meno disturbato dalla Luna.
     I periodi spenti propongono l'oggetto migliore. Scrive 'proposed' e 'choice' di ogni
     periodo. Come NightSky.propose dell'APK."""
     periods = plan.get("periods") or []
@@ -1146,7 +1285,7 @@ def plan_propose(plan: dict) -> None:
         for p in periods:
             p["proposed"] = p["choice"] = -1
         return
-    score = [[_period_score(p["alts"][o]) for o in range(m)] for p in periods]
+    score = [[_period_score(p["alts"][o], _period_moon(p, o)) for o in range(m)] for p in periods]
 
     def best_of(i: int) -> int:
         o = max(range(m), key=lambda k: (score[i][k], -k))
@@ -1207,9 +1346,11 @@ def plan_finalize(plan: dict) -> dict:
         # come i preferiti: il peggiore fra altezza e meteo; arancione se è solo il meteo a bloccare
         high_level = _altitude_level(avg)
         level = min(high_level, int(sky["level"])) if sky and "level" in sky else high_level
+        level = min(level, moon_level(_period_moon(p, o)))
         face = WEATHER_BLOCK if level == NOT_VISIBLE and high_level > NOT_VISIBLE else level
         item = items[o]
-        lines.append([face, f"{span}  {sky_text(sky)}  →  {item.get('name')} · {avg:.0f}° (min {low:.0f}°)"])
+        lines.append([face, f"{span}  {sky_text(sky)}  →  {item.get('name')} · {avg:.0f}° (min {low:.0f}°)"
+                            + _moon_note(p, o)])
         if steps and steps[-1]["name"] == str(item.get("name") or "") and steps[-1]["end"] == p["start"]:
             steps[-1]["end"] = p["end"]
             steps[-1]["level"] = min(steps[-1]["level"], level)
@@ -1341,7 +1482,7 @@ def plan_option_text(plan: dict, period: dict, o: int) -> str:
     star = "★ " if o == period.get("proposed") else ""
     if high < 15:
         return f"{star}{item.get('name')} · non visibile (max {high:.0f}°)"
-    return f"{star}{item.get('name')} · {avg:.0f}° (min {low:.0f}°)"
+    return f"{star}{item.get('name')} · {avg:.0f}° (min {low:.0f}°)" + _moon_note(period, o)
 
 
 def plan_night(lat: float, lon: float, items: list[dict], night: date) -> dict:
@@ -1349,7 +1490,8 @@ def plan_night(lat: float, lon: float, items: list[dict], night: date) -> dict:
     La notte (sole sotto -6°, da adesso se è già iniziata) è divisa in periodi tutti uguali:
     un multiplo del numero di oggetti, lunghi circa 75 min e mai meno di 60. Ogni periodo
     ha il suo meteo (sereno / poco nuvoloso / nuvoloso / pioggia, con nubi e pioggia %),
-    l'altezza di ogni oggetto e la proposta automatica; nuvoloso e pioggia restano accesi.
+    l'altezza di ogni oggetto, la Luna (fase %, altezza media, disturbo e distanza per oggetto)
+    e la proposta automatica; nuvoloso e pioggia restano accesi.
     L'utente può accendere/spegnere i periodi e cambiare l'oggetto (poi plan_finalize).
     Come NightSky.plan dell'APK."""
     weather_ok = _weather_cached(lat, lon) is not None
@@ -1409,14 +1551,21 @@ def plan_night(lat: float, lon: float, items: list[dict], night: date) -> dict:
                     pop = max(pops)
                     sky = {"kind": sky_kind(cloud, pop), "cloud": cloud, "pop": pop,
                            "level": _weather_level(cloud, pop)}
-                alts = []
+                utcs = [datetime.fromtimestamp(t.timestamp(), _UTC) for t in samples]
+                moons = [moon_at(lat, lon, u) for u in utcs]
+                alts, impacts, seps = [], [], []
                 for ob in objs:
-                    vals = [alt_az(lat, lon, ob["ra"], ob["dec"],
-                                   datetime.fromtimestamp(t.timestamp(), _UTC))[0] for t in samples]
+                    vals = [alt_az(lat, lon, ob["ra"], ob["dec"], u)[0] for u in utcs]
                     alts.append([round(sum(vals) / len(vals), 1), round(min(vals), 1), round(max(vals), 1)])
+                    impacts.append(round(sum(moon_impact(mn, ob["ra"], ob["dec"]) for mn in moons) / len(moons), 3))
+                    seps.append(round(sum(separation(mn.ra, mn.dec, ob["ra"], ob["dec"]) for mn in moons)
+                                      / len(moons)))
+                moon = {"illum": round(100 * sum(mn.illum for mn in moons) / len(moons)),
+                        "alt": round(sum(mn.alt for mn in moons) / len(moons), 1),
+                        "impact": impacts, "sep": seps}
                 periods.append({
                     "start": int(p0.timestamp() * 1000), "end": int(p1.timestamp() * 1000),
-                    "sky": sky, "enabled": True,
+                    "sky": sky, "moon": moon, "enabled": True,
                     "alts": alts, "proposed": -1, "choice": -1,
                 })
     plan = {

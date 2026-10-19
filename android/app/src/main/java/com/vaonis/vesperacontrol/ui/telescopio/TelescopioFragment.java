@@ -232,7 +232,7 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
      * Comandi eseguibili ora, dallo stato del telescopio (stesse regole del pannello Helper e di Windows).
      * Non raggiungibile o in spegnimento: nessun comando. I campi assenti (Helper vecchi) non bloccano.
      */
-    static Set<String> allowedTelActions(@Nullable JSONObject tel) {
+    public static Set<String> allowedTelActions(@Nullable JSONObject tel) {
         Set<String> out = new HashSet<>();
         if (tel == null || !tel.optBoolean("reachable") || tel.optBoolean("isShuttingDown")) return out;
         boolean moving = telMoving(tel);
@@ -528,7 +528,7 @@ public class TelescopioFragment extends Fragment implements TabRefreshable {
     }
 
     /** Spiega in italiano gli errori più comuni (come tel_error_text su Windows). */
-    static String telescopeErrorText(String ack) {
+    public static String telescopeErrorText(String ack) {
         String low = ack == null ? "" : ack.toLowerCase(Locale.ROOT);
         String hint;
         if (low.contains("no_site")) {

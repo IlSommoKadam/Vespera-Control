@@ -27,6 +27,7 @@ import com.google.android.material.snackbar.Snackbar;
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
 import com.vaonis.vesperacontrol.adb.AdbBridge;
+import com.vaonis.vesperacontrol.ftp.FtpListStore;
 import com.vaonis.vesperacontrol.ui.TabRefreshable;
 import com.vaonis.vesperacontrol.ui.anteprima.AnteprimaFragment;
 import com.vaonis.vesperacontrol.ui.connections.ConnessioniFragment;
@@ -220,6 +221,8 @@ public class MainActivity extends AppCompatActivity {
             AdbBridge adb = AdbBridgeHolder.get(this);
             if (!adb.isLinked()) adb.ensureConnectedAsync(null);
         }
+        // Ripresa da background: aggiorna elenco FTP senza annullare un download già in corso.
+        FtpListStore.get().refreshIfNeeded(this);
     }
 
     @Override

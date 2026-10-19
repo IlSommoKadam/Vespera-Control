@@ -96,7 +96,13 @@ public final class NightSky {
                     if (alt > maxAlt) maxAlt = alt;
                     high = altitudeLevel(alt);
                 }
-                slots.add(new Slot(cursor, sky, high, raw == null ? null : raw.get(hour)));
+                Moon moon = new Moon(latDeg, lonDeg, utc);
+                double impact = hasObject ? moon.impact(raDeg, decDeg) : moon.impact(Double.NaN, Double.NaN);
+                Slot slot = new Slot(cursor, sky, high, raw == null ? null : raw.get(hour), moonLevel(impact));
+                slot.moon = moon;
+                slot.impact = impact;
+                if (hasObject) slot.sep = separation(moon.ra, moon.dec, raDeg, decDeg);
+                slots.add(slot);
             }
             // Notte già finita (mattina): mostra la prossima.
             boolean over = !slots.isEmpty()
@@ -112,6 +118,7 @@ public final class NightSky {
         }
         lines.add(new Line(NONE, "Notte " + CLOCK.format(slots.get(0).when) + "–"
                 + CLOCK.format(slots.get(slots.size() - 1).when.plusMinutes(STEP_MIN))));
+        lines.add(moonLine(slots, hasObject));
 
         int[] minutes = new int[4];
         for (Slot s : slots) minutes[s.level()] += STEP_MIN;
@@ -148,8 +155,16 @@ public final class NightSky {
             SlotTest test = s -> s.level() == wanted;
             String r = ranges(slots, test);
             if (r.isEmpty()) continue;
-            // Solo cielo: la scarsa dipende sempre dal meteo, si dice subito perché
-            String why = !hasObject && level == POOR ? weatherCause(slots, test) : "";
+            // Solo cielo: buona/scarsa dipendono da meteo o Luna, si dice subito perché
+            String why = "";
+            if (!hasObject && (level == GOOD || level == POOR)) {
+                List<String> parts = new ArrayList<>();
+                String weatherWhy = level == POOR ? weatherCause(slots, test) : "";
+                String moonWhy = moonCause(slots, s -> test.test(s) && s.moonLv <= s.sky, false);
+                if (!weatherWhy.isEmpty()) parts.add(weatherWhy);
+                if (!moonWhy.isEmpty()) parts.add(moonWhy);
+                why = String.join(", ", parts);
+            }
             lines.add(new Line(level, label(level) + "  " + r + (why.isEmpty() ? "" : " · " + why)));
         }
         // Non visibile, due righe: meteo (arancione, è una previsione) e oggetto basso (rosso, è certo)
@@ -165,19 +180,64 @@ public final class NightSky {
         if (!r.isEmpty()) lines.add(new Line(NOT_VISIBLE, "Non visibile  " + r + " · oggetto sotto 15°"));
 
         if (weather == null) {
-            lines.add(new Line(NONE, "Meteo non raggiungibile: conta solo l'altezza dell'oggetto."));
-        } else if (hasObject) {
-            SlotTest byClouds = s -> s.sky < GOOD && s.sky <= s.high;
+            lines.add(new Line(NONE, "Meteo non raggiungibile: contano solo altezza dell'oggetto e Luna."));
+        }
+        if (hasObject) {
+            final boolean haveWeather = weather != null;
+            SlotTest byClouds = s -> haveWeather && s.sky < GOOD && s.sky <= Math.min(s.high, s.moonLv);
+            SlotTest byMoon = s -> s.moonLv < GOOD && s.moonLv <= Math.min(s.sky, s.high);
             String clouds = ranges(slots, byClouds);
-            String low = ranges(slots, s -> s.high < GOOD && s.high <= s.sky);
-            if (!clouds.isEmpty() || !low.isEmpty()) lines.add(new Line(NONE, "Perché:"));
+            String low = ranges(slots, s -> s.high < GOOD && s.high <= Math.min(s.sky, s.moonLv));
+            String bright = ranges(slots, byMoon);
+            if (!clouds.isEmpty() || !low.isEmpty() || !bright.isEmpty()) lines.add(new Line(NONE, "Perché:"));
             if (!clouds.isEmpty()) {
                 String why = weatherCause(slots, byClouds);
                 lines.add(new Line(NONE, "  nuvole/pioggia  " + clouds + (why.isEmpty() ? "" : " · " + why)));
             }
             if (!low.isEmpty()) lines.add(new Line(NONE, "  oggetto basso (sotto 30°)  " + low));
+            if (!bright.isEmpty()) {
+                lines.add(new Line(NONE, "  Luna  " + bright + " · " + moonCause(slots, byMoon, true)));
+            }
         }
         return lines;
+    }
+
+    /**
+     * "Luna 78% calante · sopra l'orizzonte 23:10–05:00 · distanza minima dall'oggetto 40°"
+     * con la faccina del disturbo peggiore. Come sky._moon_line.
+     */
+    private static Line moonLine(List<Slot> slots, boolean hasObject) {
+        Moon mid = slots.get(slots.size() / 2).moon;
+        int pct = (int) Math.round(mid.illum * 100);
+        String phase = mid.waxing ? "crescente" : "calante";
+        if (pct < 3) return new Line(GREAT, "Luna nuova (" + pct + "%): non disturba");
+        String up = ranges(slots, s -> s.moon.alt > 0);
+        if (up.isEmpty()) return new Line(GREAT, "Luna " + pct + "% " + phase + ": sotto l'orizzonte tutta la notte");
+        int worst = GREAT;
+        double minSep = 180;
+        for (Slot s : slots) {
+            worst = Math.min(worst, s.moonLv);
+            if (s.moon.alt > 0 && !Double.isNaN(s.sep)) minSep = Math.min(minSep, s.sep);
+        }
+        StringBuilder sb = new StringBuilder("Luna ").append(pct).append("% ").append(phase)
+                .append(" · sopra l'orizzonte ").append(up);
+        if (hasObject) sb.append(String.format(Locale.ITALY, " · distanza minima dall'oggetto %.0f°", minSep));
+        if (worst >= GREAT) sb.append(" · non disturba");
+        return new Line(worst, sb.toString());
+    }
+
+    /** "luna 78% a 45° d'altezza" (con near: "…, a 25° dall'oggetto"); vuoto se la Luna non c'entra. */
+    private static String moonCause(List<Slot> slots, SlotTest test, boolean near) {
+        Slot worst = null;
+        for (Slot s : slots) {
+            if (!test.test(s) || s.moonLv >= GREAT || s.moon == null) continue;
+            if (worst == null || s.impact > worst.impact) worst = s;
+        }
+        if (worst == null) return "";
+        String text = String.format(Locale.ITALY, "luna %d%% a %.0f° d'altezza",
+                Math.round(worst.moon.illum * 100), worst.moon.alt);
+        if (near && !Double.isNaN(worst.sep)) text += String.format(Locale.ITALY, ", a %.0f° dall'oggetto", worst.sep);
+        return text;
     }
 
     /** Vero se, contando solo l'altezza, l'oggetto si vedrebbe per almeno 30 minuti (≥ 15°). */
@@ -309,6 +369,7 @@ public final class NightSky {
         List<ZonedDateTime> dark = new ArrayList<>();
         List<Integer> sky = new ArrayList<>();
         List<int[]> rawSky = new ArrayList<>();
+        List<Moon> moons = new ArrayList<>();
         boolean weatherSeen = false;
         for (ZonedDateTime cursor = start; cursor.isBefore(end); cursor = cursor.plusMinutes(STEP_MIN)) {
             long utc = cursor.toInstant().toEpochMilli();
@@ -320,6 +381,7 @@ public final class NightSky {
             dark.add(cursor);
             sky.add(v == null ? GREAT : v);
             rawSky.add(w == null || w.raw == null ? null : w.raw.get(hour));
+            moons.add(new Moon(latDeg, lonDeg, utc));
         }
         String nightLine = dark.isEmpty()
                 ? "Il cielo non diventa abbastanza buio."
@@ -333,7 +395,8 @@ public final class NightSky {
                 long utc = dark.get(i).toInstant().toEpochMilli();
                 double alt = SkyCatalog.altAz(latDeg, lonDeg, item.raDeg, item.decDeg, utc)[0];
                 if (alt > maxAlt) maxAlt = alt;
-                slots.add(new Slot(dark.get(i), sky.get(i), altitudeLevel(alt), rawSky.get(i)));
+                slots.add(new Slot(dark.get(i), sky.get(i), altitudeLevel(alt), rawSky.get(i),
+                        moonLevel(moons.get(i).impact(item.raDeg, item.decDeg))));
             }
             int[] minutes = new int[4];
             for (Slot s : slots) minutes[s.level()] += STEP_MIN;
@@ -405,10 +468,29 @@ public final class NightSky {
         return new double[]{a.optDouble(0, -90), a.optDouble(1, -90), a.optDouble(2, -90)};
     }
 
-    /** Media dell'altezza, penalizzata se scende sotto 30°; -1000 se non sale mai a 15°. */
-    private static double periodScore(double[] a) {
+    /**
+     * Media dell'altezza, penalizzata se scende sotto 30° e per il disturbo della Luna (fase,
+     * altezza e distanza dall'oggetto); -1000 se non sale mai a 15°.
+     */
+    private static double periodScore(double[] a, double moon) {
         if (a[2] < 15) return -1000;
-        return a[0] - 2.0 * Math.max(0, 30 - a[1]);
+        return a[0] - 2.0 * Math.max(0, 30 - a[1]) - MOON_WEIGHT * moon;
+    }
+
+    /** Disturbo medio della Luna per l'oggetto o nel periodo (0 se il piano non lo ha). */
+    private static double periodMoon(JSONObject period, int o) {
+        JSONObject moon = period.optJSONObject("moon");
+        JSONArray impact = moon == null ? null : moon.optJSONArray("impact");
+        return impact == null ? 0 : impact.optDouble(o, 0);
+    }
+
+    /** " · ☾ 78% a 35°" se la Luna disturba l'oggetto nel periodo, altrimenti "". */
+    private static String moonNote(JSONObject period, int o) {
+        if (periodMoon(period, o) < MOON_GREAT_MAX) return "";
+        JSONObject moon = period.optJSONObject("moon");
+        JSONArray sep = moon.optJSONArray("sep");
+        if (sep == null || !moon.has("illum")) return " · ☾";
+        return String.format(Locale.ITALY, " · ☾ %d%% a %.0f°", moon.optInt("illum"), sep.optDouble(o, 0));
     }
 
     private static final int PLAN_STATES_MAX = 5000;
@@ -442,7 +524,7 @@ public final class NightSky {
      * 1. più ore possibili: ogni periodo attivo con almeno un oggetto alto ne riceve uno visibile;
      * 2. più equa possibile: stesso numero di periodi per oggetto (minima somma dei quadrati);
      * 3. ore consecutive: meno cambi di oggetto possibile;
-     * 4. a parità, ogni oggetto nei periodi dove è più alto.
+     * 4. a parità, ogni oggetto nei periodi dove è più alto e meno disturbato dalla Luna.
      * I periodi spenti propongono l'oggetto migliore. Scrive "proposed" e "choice".
      * Come sky.plan_propose su Windows.
      */
@@ -461,7 +543,8 @@ public final class NightSky {
             }
             double[][] score = new double[k][m];
             for (int i = 0; i < k; i++) {
-                for (int o = 0; o < m; o++) score[i][o] = periodScore(alts(periods.getJSONObject(i), o));
+                JSONObject p = periods.getJSONObject(i);
+                for (int o = 0; o < m; o++) score[i][o] = periodScore(alts(p, o), periodMoon(p, o));
             }
             int[] pick = new int[k];
             List<Integer> active = new ArrayList<>();
@@ -533,7 +616,7 @@ public final class NightSky {
             for (int i = 0; periods != null && i < periods.length(); i++) {
                 JSONObject p = periods.getJSONObject(i);
                 boolean any = false;
-                for (int o = 0; o < m && !any; o++) any = periodScore(alts(p, o)) > -1000;
+                for (int o = 0; o < m && !any; o++) any = periodScore(alts(p, o), 0) > -1000;
                 p.put("enabled", any);
             }
         } catch (Exception ignored) {
@@ -581,9 +664,10 @@ public final class NightSky {
                 // come i preferiti: il peggiore fra altezza e meteo; terzo campo = bloccato dal meteo
                 int high = altitudeLevel(a[0]);
                 int level = sky != null && sky.has("level") ? Math.min(high, sky.optInt("level")) : high;
+                level = Math.min(level, moonLevel(periodMoon(p, o)));
                 boolean weather = level == NOT_VISIBLE && high > NOT_VISIBLE;
                 lines.put(new JSONArray().put(level).put(head + String.format(Locale.ITALY,
-                        "%s · %.0f° (min %.0f°)", item.optString("name"), a[0], a[1])).put(weather));
+                        "%s · %.0f° (min %.0f°)", item.optString("name"), a[0], a[1]) + moonNote(p, o)).put(weather));
                 JSONObject last = steps.length() == 0 ? null : steps.getJSONObject(steps.length() - 1);
                 if (last != null && last.optString("name").equals(item.optString("name"))
                         && last.optLong("end") == start) {
@@ -790,7 +874,14 @@ public final class NightSky {
         double[] a = alts(period, o);
         String star = o == period.optInt("proposed", -1) ? "★ " : "";
         if (a[2] < 15) return String.format(Locale.ITALY, "%s%s · non visibile (max %.0f°)", star, name, a[2]);
-        return String.format(Locale.ITALY, "%s%s · %.0f° (min %.0f°)", star, name, a[0], a[1]);
+        String moon = moonNote(period, o);
+        // la Luna va a capo: sul telefono la riga dell'oggetto è stretta
+        if (moon.equals(" · ☾")) {
+            moon = "\n☾ Luna disturba";
+        } else if (!moon.isEmpty()) {
+            moon = "\n☾ Luna" + moon.substring(" · ☾".length()) + " dall'oggetto";
+        }
+        return String.format(Locale.ITALY, "%s%s · %.0f° (min %.0f°)", star, name, a[0], a[1]) + moon;
     }
 
     /**
@@ -798,10 +889,12 @@ public final class NightSky {
      * La notte (sole sotto -6°, da adesso se è già iniziata) è divisa in periodi tutti uguali:
      * un multiplo del numero di oggetti, lunghi circa 75 min e mai meno di 60. Ogni periodo ha
      * il suo meteo (sereno / poco nuvoloso / nuvoloso / pioggia, con nubi e pioggia %), l'altezza
-     * di ogni oggetto e la proposta automatica; nuvoloso e pioggia restano accesi.
+     * di ogni oggetto, la Luna (fase %, altezza media, disturbo e distanza per oggetto) e la proposta
+     * automatica; nuvoloso e pioggia restano accesi.
      * L'utente accende/spegne i periodi e cambia l'oggetto (poi {@link #finalizePlan}).
      * Come sky.plan_night su Windows. JSON: title, night, created, items, periods
-     * [{start,end,sky{kind,cloud,pop,level},enabled,alts[[media,min,max]],proposed,choice}],
+     * [{start,end,sky{kind,cloud,pop,level},moon{illum,alt,impact[],sep[]},enabled,alts[[media,min,max]],
+     * proposed,choice}],
      * steps [{start,end,name,type,ra,dec,level}], lines [[level,text]], weather, parkAtEnd.
      */
     public static JSONObject plan(double latDeg, double lonDeg, List<Item> items, LocalDate night) {
@@ -865,22 +958,44 @@ public final class NightSky {
                             p.put("sky", new JSONObject().put("kind", kind).put("cloud", cloud)
                                     .put("pop", popMax).put("level", weatherLevel(cloud, popMax)));
                         }
+                        List<Moon> moons = new ArrayList<>();
+                        double illumSum = 0;
+                        double moonAltSum = 0;
+                        for (ZonedDateTime t : samples) {
+                            Moon mn = new Moon(latDeg, lonDeg, t.toInstant().toEpochMilli());
+                            moons.add(mn);
+                            illumSum += mn.illum;
+                            moonAltSum += mn.alt;
+                        }
+                        int ns = Math.max(1, samples.size());
                         JSONArray alts = new JSONArray();
+                        JSONArray impacts = new JSONArray();
+                        JSONArray seps = new JSONArray();
                         for (Item item : items) {
                             double sum = 0;
                             double lo = 90;
                             double hi = -90;
-                            for (ZonedDateTime t : samples) {
+                            double impactSum = 0;
+                            double sepSum = 0;
+                            for (int j = 0; j < samples.size(); j++) {
                                 double a = SkyCatalog.altAz(latDeg, lonDeg, item.raDeg, item.decDeg,
-                                        t.toInstant().toEpochMilli())[0];
+                                        samples.get(j).toInstant().toEpochMilli())[0];
                                 sum += a;
                                 lo = Math.min(lo, a);
                                 hi = Math.max(hi, a);
+                                Moon mn = moons.get(j);
+                                impactSum += mn.impact(item.raDeg, item.decDeg);
+                                sepSum += separation(mn.ra, mn.dec, item.raDeg, item.decDeg);
                             }
                             double avg = samples.isEmpty() ? -90 : sum / samples.size();
                             alts.put(new JSONArray().put(Math.round(avg * 10) / 10.0)
                                     .put(Math.round(lo * 10) / 10.0).put(Math.round(hi * 10) / 10.0));
+                            impacts.put(Math.round(impactSum / ns * 1000) / 1000.0);
+                            seps.put(Math.round(sepSum / ns));
                         }
+                        p.put("moon", new JSONObject().put("illum", Math.round(100 * illumSum / ns))
+                                .put("alt", Math.round(moonAltSum / ns * 10) / 10.0)
+                                .put("impact", impacts).put("sep", seps));
                         p.put("enabled", true);
                         p.put("alts", alts);
                         p.put("proposed", -1);
@@ -1043,6 +1158,78 @@ public final class NightSky {
         return new double[]{ra, dec};
     }
 
+    /** RA/Dec geocentrici della Luna in gradi (serie ridotta di Meeus, ~0,3°). */
+    static double[] moonRaDec(long utcMs) {
+        double d = utcMs / 86_400_000.0 + 2_440_587.5 - 2_451_545.0;
+        double L = 218.316 + 13.176396 * d;
+        double M = Math.toRadians(134.963 + 13.064993 * d);
+        double F = Math.toRadians(93.272 + 13.229350 * d);
+        double D = Math.toRadians(297.850 + 12.190749 * d);
+        double Ms = Math.toRadians(357.529 + 0.98560028 * d);
+        double lam = Math.toRadians(L + 6.289 * Math.sin(M) - 1.274 * Math.sin(2 * D - M)
+                + 0.658 * Math.sin(2 * D) + 0.214 * Math.sin(2 * M) - 0.186 * Math.sin(Ms)
+                - 0.114 * Math.sin(2 * F));
+        double beta = Math.toRadians(5.128 * Math.sin(F) + 0.281 * Math.sin(M + F)
+                + 0.278 * Math.sin(M - F) + 0.173 * Math.sin(2 * D - F));
+        double eps = Math.toRadians(23.439 - 0.0000004 * d);
+        double ra = norm360(Math.toDegrees(Math.atan2(
+                Math.sin(lam) * Math.cos(eps) - Math.tan(beta) * Math.sin(eps), Math.cos(lam))));
+        double dec = Math.toDegrees(Math.asin(Math.sin(beta) * Math.cos(eps)
+                + Math.cos(beta) * Math.sin(eps) * Math.sin(lam)));
+        return new double[]{ra, dec};
+    }
+
+    /** Distanza angolare in gradi fra due punti del cielo. */
+    static double separation(double ra1, double dec1, double ra2, double dec2) {
+        double a = Math.toRadians(dec1);
+        double b = Math.toRadians(dec2);
+        double c = Math.sin(a) * Math.sin(b) + Math.cos(a) * Math.cos(b) * Math.cos(Math.toRadians(ra1 - ra2));
+        return Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, c))));
+    }
+
+    /** Posizione e fase della Luna in un istante. */
+    static final class Moon {
+        final double ra;
+        final double dec;
+        final double alt;
+        /** Frazione illuminata 0..1. */
+        final double illum;
+        final boolean waxing;
+
+        Moon(double latDeg, double lonDeg, long utcMs) {
+            double[] m = moonRaDec(utcMs);
+            double[] sun = sunRaDec(utcMs);
+            ra = m[0];
+            dec = m[1];
+            alt = SkyCatalog.altAz(latDeg, lonDeg, ra, dec, utcMs)[0];
+            illum = (1 - Math.cos(Math.toRadians(separation(ra, dec, sun[0], sun[1])))) / 2;
+            waxing = norm360(ra - sun[0]) < 180;
+        }
+
+        /** 0 = nessun disturbo; ~1 = Luna piena alta; fino a 1,3 se è vicina all'oggetto (NaN = solo cielo). */
+        double impact(double raDeg, double decDeg) {
+            if (alt <= 0 || illum < 0.03) return 0;
+            double v = illum * Math.min(1, alt / 20.0);
+            if (!Double.isNaN(raDeg)) {
+                v *= Math.max(0.4, Math.min(1.3, 1.5 - separation(ra, dec, raDeg, decDeg) / 90.0));
+            }
+            return v;
+        }
+    }
+
+    // Disturbo della Luna: fase × altezza (piena da 20°) × vicinanza all'oggetto. Come sky.py.
+    private static final double MOON_GREAT_MAX = 0.15;
+    private static final double MOON_GOOD_MAX = 0.6;
+    /** Peso nella proposta automatica del piano (in gradi di altezza media). */
+    private static final double MOON_WEIGHT = 30.0;
+
+    /** La Luna da sola non rende mai "non visibile": al peggio scarsa. */
+    private static int moonLevel(double impact) {
+        if (impact < MOON_GREAT_MAX) return GREAT;
+        if (impact < MOON_GOOD_MAX) return GOOD;
+        return POOR;
+    }
+
     private static double norm360(double deg) {
         double v = deg % 360.0;
         return v < 0 ? v + 360.0 : v;
@@ -1069,17 +1256,24 @@ public final class NightSky {
         /** Nubi % e probabilità di pioggia % dell'ora; -1 se il meteo non c'è. */
         final int cloud;
         final int pop;
+        /** Livello dato dalla Luna (mai sotto scarsa). */
+        final int moonLv;
+        /** Luna del quarto d'ora (solo nel rapporto), disturbo e distanza dall'oggetto (NaN se solo cielo). */
+        Moon moon;
+        double impact;
+        double sep = Double.NaN;
 
-        Slot(ZonedDateTime when, int sky, int high, int[] raw) {
+        Slot(ZonedDateTime when, int sky, int high, int[] raw, int moonLv) {
             this.when = when;
             this.sky = sky;
             this.high = high;
             this.cloud = raw == null ? -1 : raw[0];
             this.pop = raw == null ? -1 : raw[1];
+            this.moonLv = moonLv;
         }
 
         int level() {
-            return Math.min(sky, high);
+            return Math.min(Math.min(sky, high), moonLv);
         }
     }
 }

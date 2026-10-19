@@ -5,6 +5,11 @@
     <string name="mega_version_url" translatable="false">https://mega.nz/folder/6xgAFYqY#fvY3ii_8ytQtujuGIMATmQ</string>
 
     <string name="tab_target">Target</string>
+    <string name="target_sub_active">Piano attivo</string>
+    <string name="target_sub_search">Cerca</string>
+    <string name="plan_active_hint">Piano caricato sull\'Helper: avanzamento totale e per ogni passo.</string>
+    <string name="plan_progress_total">Avanzamento totale %1$d%%</string>
+    <string name="plan_progress_step">%1$d%%</string>
     <string name="tab_connessioni">Connessioni</string>
     <string name="tab_foto">Foto / Hard Disk</string>
     <string name="tab_telescopio">Telescopio</string>
@@ -230,7 +235,7 @@
     <string name="fav_add">☆ Aggiungi ai preferiti</string>
     <string name="fav_remove">★ Togli dai preferiti</string>
     <string name="fav_section">Preferiti</string>
-    <string name="fav_hint">Ordinati per visibilità nella notte scelta (meteo + altezza). Tocca un oggetto per aprirlo.</string>
+    <string name="fav_hint">Ordinati per visibilità nella notte scelta (meteo, altezza e Luna). Tocca un oggetto per aprirlo.</string>
     <string name="fav_empty">Nessun preferito. Cerca un oggetto e tocca \"Aggiungi ai preferiti\".</string>
     <string name="fav_loading">Calcolo la classifica…</string>
     <string name="fav_no_weather">Meteo non disponibile per questa notte: conta solo l\'altezza.</string>

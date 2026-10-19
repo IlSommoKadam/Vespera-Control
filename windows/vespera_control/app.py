@@ -172,6 +172,63 @@ def current_observation_line(tel: dict | None) -> str:
     return text
 
 
+def _minutes_ms(ms: int) -> str:
+    m = round(int(ms or 0) / 60000)
+    if m < 60:
+        return f"{m} min"
+    return f"{m // 60}h" if m % 60 == 0 else f"{m // 60}h{m % 60:02d}"
+
+
+def vespera_live_status(tel: dict | None) -> str:
+    """Stato reale del Vespera (come tab Telescopio), senza prefisso — sezione Corrente del piano."""
+    if not tel:
+        return "Stato Vespera non disponibile."
+    if not tel.get("reachable"):
+        err = str(tel.get("error") or "").strip()
+        return f"Non raggiungibile ({err})." if err else "Telescopio non raggiungibile."
+    observing = bool(tel.get("isObserving", tel.get("observationStatus") == "RUNNING"))
+    if not observing:
+        status = str(tel.get("observationStatus") or "").strip()
+        if not status or status.upper() in ("IDLE", "NONE"):
+            return "Nessuna osservazione in corso."
+        return f"Nessuna osservazione · {status}"
+    name = str(tel.get("targetName") or "").strip() or "in corso"
+    parts = [name]
+    op = str(tel.get("operationType") or "").strip()
+    step = str(tel.get("step") or "").strip()
+    if op or step:
+        parts.append(f"{op}/{step}" if op and step else (op or step))
+    tracking = str(tel.get("tracking") or "").strip().upper()
+    if tracking == "ON":
+        parts.append("tracking on")
+    elif tracking == "STARTING":
+        parts.append("tracking in avvio")
+    stacks = int(tel.get("stackingCount") or 0)
+    exp = float(tel.get("exposureMicroSec") or 0) / 1_000_000
+    if stacks > 0 and exp > 0:
+        m = round(stacks * exp / 60)
+        time = f"{m} min" if m < 60 else (f"{m // 60}h" if m % 60 == 0 else f"{m // 60}h{m % 60:02d}")
+        parts.append(f"{time} integrati ({stacks} pose da {exp:.0f} s)")
+    elif stacks > 0:
+        parts.append(f"{stacks} pose")
+    text = " · ".join(parts)
+    clock = tel.get("trackingClock") or {}
+    if isinstance(clock, dict):
+        run = int(clock.get("runMs") or 0)
+        tonight = int(clock.get("tonightMs") or 0)
+        tname = str(clock.get("target") or "").strip()
+        if run >= 60_000 or tonight >= 60_000:
+            bits = []
+            if tname:
+                bits.append(tname)
+            if run >= 60_000:
+                bits.append(f"da {_minutes_ms(run)}")
+            if tonight >= 60_000:
+                bits.append(f"stanotte {_minutes_ms(tonight)}")
+            text += "\nTracking: " + " · ".join(bits)
+    return text
+
+
 def tel_error_text(ack: str) -> str:
     """Spiega in italiano gli errori più comuni dei comandi telescopio."""
     low = (ack or "").lower()
@@ -313,7 +370,7 @@ class App(tk.Tk):
         self._plan_saved = False
         self._plan_faces: list = []
         self._plan_period_faces: list = []
-        self.plan_helper = tk.StringVar(value="")
+        self.plan_helper_text: tk.Text | None = None
 
         self._style()
         self._build()
@@ -574,6 +631,9 @@ class App(tk.Tk):
             if self._active_tab == key:
                 canvas.yview_scroll(int(-event.delta / 120) or (-1 if event.delta > 0 else 1), "units")
 
+        if not hasattr(self, "_scroll_canvases"):
+            self._scroll_canvases: dict[str, tk.Canvas] = {}
+        self._scroll_canvases[key] = canvas
         canvas.bind_all("<MouseWheel>", wheel, add="+")
         canvas.bind_all("<Button-4>", lambda _e: self._active_tab == key and canvas.yview_scroll(-1, "units"), add="+")
         canvas.bind_all("<Button-5>", lambda _e: self._active_tab == key and canvas.yview_scroll(1, "units"), add="+")
@@ -909,9 +969,124 @@ class App(tk.Tk):
         self._tel_details_rows: list | None = None
 
     def _build_target(self) -> None:
-        """Tab Target: cerca un oggetto, preferiti e piano della notte."""
-        self._build_observe()
-        self._build_favorites()
+        """Tab Target come l'APK: sotto-tab «Piano attivo» (stato sull'Helper) e «Cerca»
+        (osserva, preferiti, piano della notte, piani salvati)."""
+        bar = ttk.Frame(self.tab_tgt)
+        bar.pack(fill="x", pady=(0, 10))
+        self._tgt_panels: dict[int, ttk.Frame] = {}
+        self._tgt_sub_labels: list[tuple[tk.Frame, tk.Label]] = []
+        for index, title in enumerate(("Piano attivo", "Cerca")):
+            bar.columnconfigure(index, weight=1, uniform="tgtsub")
+            cell = tk.Frame(bar, bg=PANEL_STROKE, highlightthickness=0, bd=0)
+            cell.grid(row=0, column=index, sticky="nsew", padx=(0 if index == 0 else 3, 0))
+            label = tk.Label(cell, text=title, bg=TAB_IDLE, fg="#263238", font=("Segoe UI", 10, "bold"),
+                             padx=6, pady=7, cursor="hand2", anchor="center")
+            label.pack(fill="both", expand=True, padx=1, pady=1)
+            label.bind("<Button-1>", lambda _e, i=index: self._select_tgt_sub(i))
+            cell.bind("<Button-1>", lambda _e, i=index: self._select_tgt_sub(i))
+            self._tgt_sub_labels.append((cell, label))
+            self._tgt_panels[index] = ttk.Frame(self.tab_tgt)
+        self._tgt_sub = -1
+        self._build_active_plan(self._tgt_panels[0])
+        self._build_observe(self._tgt_panels[1])
+        self._build_favorites(self._tgt_panels[1])
+        self._select_tgt_sub(0)
+
+    def _select_tgt_sub(self, index: int) -> None:
+        if index != self._tgt_sub:
+            self._tgt_sub = index
+            for i, panel in self._tgt_panels.items():
+                if i == index:
+                    panel.pack(fill="both", expand=True)
+                else:
+                    panel.pack_forget()
+            canvas = getattr(self, "_scroll_canvases", {}).get("tgt")
+            if canvas is not None:
+                canvas.yview_moveto(0)
+        for i, (cell, label) in enumerate(self._tgt_sub_labels):
+            on = i == index
+            label.configure(bg=PRIMARY if on else TAB_IDLE, fg="#ffffff" if on else "#263238")
+            cell.configure(bg=PRIMARY if on else PANEL_STROKE)
+
+    def _build_active_plan(self, parent: ttk.Frame) -> None:
+        """Piano caricato sull'Helper: avanzamento totale, stato corrente, passi, tracking."""
+        card = self._card(parent, "Piano caricato sull'Helper")
+        ttk.Label(card, text="Piano caricato sull'Helper: avanzamento totale e per ogni passo.",
+                  style="Muted.TLabel").pack(anchor="w")
+        self.plan_progress_label = tk.Label(card, text="", bg=PANEL, fg=OK, font=("Segoe UI", 11, "bold"),
+                                            anchor="w")
+        self.plan_progress_bar = tk.Canvas(card, height=12, bg=STEEL, highlightthickness=0, bd=0)
+        self._plan_progress_pct = -1
+        self.plan_progress_bar.bind("<Configure>", lambda _e: self._paint_plan_progress())
+        self._plan_progress_sep = tk.Frame(card, bg=PANEL_STROKE, height=1)
+        self._plan_progress_sep.pack(fill="x", pady=(14, 6))
+        self.plan_helper_text = tk.Text(
+            card, height=4, width=60, bg=PANEL, fg=FG, relief="flat", borderwidth=0,
+            highlightthickness=0, font=("Segoe UI", 10), wrap="word", cursor="arrow",
+        )
+        self.plan_helper_text.pack(anchor="w", fill="x")
+        self.plan_helper_text.configure(state="disabled")
+        helper_row = ttk.Frame(card, style="Card.TFrame")
+        helper_row.pack(fill="x", pady=(12, 0))
+        self.plan_cancel_btn = ttk.Button(helper_row, text="Annulla piano sull'Helper", style="Warn.TButton",
+                                          command=lambda: self.cmd("cmd|plan|cancel", wait=15))
+
+    @staticmethod
+    def _progress_tone(pct: int) -> str:
+        return OK if pct >= 70 else (ACCENT if pct >= 30 else istatus.AMBER)
+
+    def _set_plan_progress(self, pct: int | None) -> None:
+        """Etichetta e barra «Avanzamento totale» (nascoste senza piano)."""
+        label = getattr(self, "plan_progress_label", None)
+        if label is None:
+            return
+        if pct is None:
+            label.pack_forget()
+            self.plan_progress_bar.pack_forget()
+            self._plan_progress_pct = -1
+            return
+        pct = max(0, min(100, int(pct)))
+        label.configure(text=f"Avanzamento totale {pct}%", fg=self._progress_tone(pct))
+        if not label.winfo_manager():
+            label.pack(anchor="w", fill="x", pady=(14, 0), before=self._plan_progress_sep)
+            self.plan_progress_bar.pack(fill="x", pady=(6, 0), before=self._plan_progress_sep)
+        self._plan_progress_pct = pct
+        self._paint_plan_progress()
+
+    def _paint_plan_progress(self) -> None:
+        bar = self.plan_progress_bar
+        bar.delete("all")
+        pct = self._plan_progress_pct
+        if pct <= 0:
+            return
+        width = max(1, bar.winfo_width())
+        bar.create_rectangle(0, 0, round(width * pct / 100), 12, fill=self._progress_tone(pct), width=0)
+
+    @staticmethod
+    def _plan_progress_percent(steps: list, now_ms: int, done: bool) -> int:
+        """Percentuale sul calendario del piano (0–100), o 100 se terminato."""
+        if done:
+            return 100
+        starts = [int(s.get("start") or 0) for s in steps if isinstance(s, dict)]
+        ends = [int(s.get("end") or 0) for s in steps if isinstance(s, dict)]
+        if not starts:
+            return 0
+        start, end = min(starts), max(ends)
+        if end <= start or now_ms <= start:
+            return 0
+        if now_ms >= end:
+            return 100
+        return round(100 * (now_ms - start) / (end - start))
+
+    @staticmethod
+    def _step_progress_percent(step: dict, now_ms: int) -> int:
+        """Percentuale di un singolo passo rispetto alla sua finestra oraria."""
+        start, end = int(step.get("start") or 0), int(step.get("end") or 0)
+        if end <= start or now_ms <= start:
+            return 0
+        if now_ms >= end:
+            return 100
+        return round(100 * (now_ms - start) / (end - start))
 
     def _build_preview(self) -> None:
         top = ttk.Frame(self.tab_prev)
@@ -1099,8 +1274,8 @@ class App(tk.Tk):
 
     # ------------------------------------------------------------------ Osserva (come APK)
 
-    def _build_observe(self) -> None:
-        card = self._card(self.tab_tgt, "Osserva")
+    def _build_observe(self, parent: ttk.Frame) -> None:
+        card = self._card(parent, "Osserva")
         card.pack_configure(fill="both", expand=True)
         self._obs_card = card
         ttk.Label(
@@ -1382,11 +1557,11 @@ class App(tk.Tk):
 
     # ------------------------------------------------------------------ Preferiti (come APK)
 
-    def _build_favorites(self) -> None:
-        card = self._card(self.tab_tgt, "Preferiti")
+    def _build_favorites(self, parent: ttk.Frame) -> None:
+        card = self._card(parent, "Preferiti")
         ttk.Label(
             card,
-            text="Ordinati per visibilità nella notte scelta (meteo + altezza). Clicca un oggetto per aprirlo.",
+            text="Ordinati per visibilità nella notte scelta (meteo, altezza e Luna). Clicca un oggetto per aprirlo.",
             style="Muted.TLabel", wraplength=1100,
         ).pack(anchor="w")
         row = ttk.Frame(card, style="Card.TFrame")
@@ -1428,16 +1603,8 @@ class App(tk.Tk):
                                         command=self.send_plan)
         self.plan_delete_btn = ttk.Button(acts, text="Elimina piano salvato", style="Danger.TButton",
                                           command=self.delete_plan)
-        ttk.Label(right, text="Piano caricato sull'Helper", style="Card.TLabel",
-                  font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(10, 0))
-        ttk.Label(right, textvariable=self.plan_helper, style="Card.TLabel", wraplength=820,
-                  justify="left").pack(anchor="w", pady=(2, 0))
-        helper_row = ttk.Frame(right, style="Card.TFrame")
-        helper_row.pack(fill="x")
-        self.plan_cancel_btn = ttk.Button(helper_row, text="Annulla piano sull'Helper", style="Warn.TButton",
-                                          command=lambda: self.cmd("cmd|plan|cancel", wait=15))
         saved = ttk.Frame(right, style="Card.TFrame")
-        saved.pack(fill="x", pady=(4, 0))
+        saved.pack(fill="x", pady=(10, 0))
         ttk.Label(saved, text="Piani salvati", style="Card.TLabel").pack(anchor="w")
         self.plans_list = tk.Listbox(
             saved, height=3, bg=ENTRY, fg=FG, selectbackground=PRIMARY, selectforeground="#ffffff",
@@ -1724,7 +1891,7 @@ class App(tk.Tk):
             tk.Label(row, text=sky.sky_text(p.get("sky")), bg=PANEL, fg=self.SKY_COLORS.get(kind, MUTED),
                      width=34, anchor="w", font=("Segoe UI", 10, "bold" if bad else "normal")).pack(side="left")
             values = [sky.plan_option_text(plan, p, o) for o in range(len(items))] + ["— nessun oggetto —"]
-            box = ttk.Combobox(row, values=values, state="readonly", width=36)
+            box = ttk.Combobox(row, values=values, state="readonly", width=46)
             choice = int(p.get("choice", -1))
             box.current(choice if 0 <= choice < len(items) else len(items))
             box.bind("<<ComboboxSelected>>", lambda _e, i=i, b=box: self._plan_choose(i, b.current()))
@@ -1893,7 +2060,8 @@ class App(tk.Tk):
                 # per vedere il piano sull'Helper: righe dei periodi e tempo per oggetto
                 "lines": [t for _lv, t in self._plan.get("lines") or []],
                 "totals": sky.totals_text(self._plan.get("totals") or [])}
-        self.plan_helper.set("Invio del piano all'Helper…")
+        self._set_plan_helper("Invio del piano all'Helper…")
+        self._select_tgt_sub(0)
         self.cmd("cmd|plan|load|" + json.dumps(body, ensure_ascii=False, separators=(",", ":")), wait=20)
 
     def _show_saved_plans(self) -> None:
@@ -1923,50 +2091,181 @@ class App(tk.Tk):
             pass
         self._show_plan(plan, saved=True)
         self.refresh_favorites()
+        self._select_tgt_sub(1)
+
+    def _set_plan_helper(self, text: str, muted: bool = False) -> None:
+        """Testo semplice nello stato piano Helper (senza capoversi)."""
+        widget = self._plan_helper_begin()
+        if widget is None:
+            return
+        widget.insert("end", text or "", ("muted",) if muted else ())
+        self._plan_helper_end(widget)
+
+    def _plan_helper_begin(self) -> tk.Text | None:
+        widget = getattr(self, "plan_helper_text", None)
+        if widget is None:
+            return None
+        widget.configure(state="normal")
+        widget.delete("1.0", "end")
+        bold = ("Segoe UI", 10, "bold")
+        # stessi colori del tab Target dell'APK
+        widget.tag_configure("head", font=bold, foreground=TITLE)
+        widget.tag_configure("head_accent", font=bold, foreground=ACCENT)
+        widget.tag_configure("num", font=bold)
+        widget.tag_configure("bold", font=bold, foreground=FG)
+        widget.tag_configure("muted", foreground=MUTED)
+        widget.tag_configure("muted_b", foreground=MUTED, font=bold)
+        widget.tag_configure("second", foreground="#455A64")
+        widget.tag_configure("accent", foreground=ACCENT)
+        widget.tag_configure("green_b", foreground=OK, font=bold)
+        widget.tag_configure("rose", foreground=ERR)
+        for tone in (OK, ACCENT, istatus.AMBER):
+            widget.tag_configure("pct" + tone, foreground=tone, font=bold)
+        return widget
+
+    def _plan_helper_end(self, widget: tk.Text) -> None:
+        widget.update_idletasks()
+        try:
+            shown = widget.count("1.0", "end", "displaylines")
+            lines = shown[0] if isinstance(shown, tuple) else int(shown or 1)
+        except Exception:
+            lines = int(widget.index("end-1c").split(".")[0])
+        widget.configure(height=max(1, min(60, lines)), state="disabled")
+
+    def _plan_helper_section(self, widget: tk.Text, title: str, body: str = "", tag: str = "head") -> None:
+        """Capoverso con riga vuota sopra e titolo colorato, poi il corpo."""
+        if widget.index("end-1c") != "1.0":
+            widget.insert("end", "\n\n")
+        widget.insert("end", title, (tag,))
+        if body:
+            widget.insert("end", "\n" + body)
+
+    def _plan_helper_pct(self, widget: tk.Text, pct: int) -> None:
+        widget.insert("end", f"{pct}%", ("pct" + self._progress_tone(pct),))
+
+    @staticmethod
+    def _planned_total_lines(totals) -> list[str]:
+        """Stringhe già formattate dall'Helper, oppure oggetti → sky.totals_text."""
+        if not totals:
+            return []
+        if isinstance(totals[0], dict):
+            return sky.totals_text(totals)
+        return [str(t).strip() for t in totals if str(t).strip()]
+
+    def _plan_helper_planned(self, widget: tk.Text, totals) -> None:
+        """Tempo previsto: nome in neretto, dettagli spezzati sotto (no muro di « · »)."""
+        lines = self._planned_total_lines(totals)
+        if not lines:
+            return
+        self._plan_helper_section(widget, "Tempo previsto")
+        for i, line in enumerate(lines):
+            parts = [p.strip() for p in line.split(" · ") if p.strip()]
+            if not parts:
+                continue
+            widget.insert("end", "\n")
+            if i:
+                widget.insert("end", "\n")
+            widget.insert("end", parts[0], ("num",))
+            for part in parts[1:]:
+                widget.insert("end", "\n   " + part)
 
     def _show_helper_plan(self, state: dict) -> None:
         plan = state.get("plan")
+        tel = state.get("telescope") if isinstance(state.get("telescope"), dict) else {}
         self.plan_cancel_btn.pack_forget()
         if not isinstance(plan, dict):
-            self.plan_helper.set("L'Helper non gestisce i piani: aggiorna Vespera Helper (≥ 0.8.23).")
+            self._set_plan_progress(None)
+            self._set_plan_helper("L'Helper non gestisce i piani: aggiorna Vespera Helper (≥ 0.8.23).", muted=True)
             return
         steps = plan.get("steps") or []
         msg = plan.get("message") or ""
         if not steps:
-            self.plan_helper.set("Helper: nessun piano" + (f" · {msg}" if msg else ""))
+            self._set_plan_progress(None)
+            self._set_plan_helper("Helper: nessun piano" + (f" · {msg}" if msg else ""), muted=True)
             return
-        out = [f"Helper: {plan.get('title')} · " + ("terminato" if plan.get("done") else "attivo")]
-        # "Errore su X: ..." è già nella riga del passo, non ripeterlo
-        if msg and not msg.startswith("Errore su "):
-            out.append(self._readable_plan_error(msg))
+        now = int(time.time() * 1000)
+        done = bool(plan.get("done"))
+        total_pct = self._plan_progress_percent(steps, now, done)
+        self._set_plan_progress(total_pct)
+        widget = self._plan_helper_begin()
+        if widget is None:
+            return
+        self._plan_helper_section(widget, "Piano")
+        widget.insert("end", "\n")
+        widget.insert("end", str(plan.get("title") or ""), ("bold",))
+        widget.insert("end", "  ·  ")
+        widget.insert("end", "terminato" if done else "attivo", ("muted_b" if done else "green_b",))
+        widget.insert("end", "  ·  ")
+        self._plan_helper_pct(widget, total_pct)
+
+        current_body = vespera_live_status(tel)
+        plan_msg = self._plan_message_for_ui(msg, tel)
+        if plan_msg:
+            current_body += "\n" + plan_msg
+        self._plan_helper_section(widget, "Corrente", current_body, tag="head_accent")
+
+        self._plan_helper_section(widget, "Passi del piano")
         cur = plan.get("current", -1)
+        cur = cur if isinstance(cur, int) else -1
         for i, s in enumerate(steps):
             t0 = datetime.fromtimestamp(int(s.get("start") or 0) / 1000)
             t1 = datetime.fromtimestamp(int(s.get("end") or 0) / 1000)
+            if done or (cur >= 0 and i < cur):
+                step_pct = 100
+            elif cur >= 0 and i > cur:
+                step_pct = 0
+            else:
+                step_pct = self._step_progress_percent(s, now)
+            is_current = i == cur and not done
+            is_done = done or (cur >= 0 and i < cur)
+            line_tags = ("green_b",) if is_current else (("muted",) if is_done else ("second",))
+            widget.insert("end", "\n\n")
+            widget.insert("end", str(i + 1), ("num",) + line_tags)
+            # ▶ / · stessa colonna: orari allineati
+            widget.insert("end", (" ▶ " if is_current else " · ")
+                          + f"{t0:%H:%M}–{t1:%H:%M}  {s.get('name')}", line_tags)
+            widget.insert("end", "  ·  ")
+            self._plan_helper_pct(widget, step_pct)
             st = self._readable_plan_error(s.get("status") or "")
-            tracked = int(s.get("trackedMs") or 0)
-            out.append(f"{'▶ ' if i == cur else '   '}{t0:%H:%M}–{t1:%H:%M}  {s.get('name')}"
-                       + (f" · {st}" if st and not st.startswith("errore") else "")
-                       + (f" · tracking {self._minutes(tracked)}" if tracked >= 60_000 else ""))
             if st.startswith("errore"):
-                out.append(f"      ⚠ {st}")
-        # Tracking reale misurato dall'Helper (≥ 0.8.47): per oggetto somma dei suoi passi, poi il piano
+                widget.insert("end", f"\n      ⚠ {st}", ("rose",))
+            elif st:
+                widget.insert("end", f"\n      {st}", ("muted",))
+            tracked = int(s.get("trackedMs") or 0)
+            if tracked >= 60_000:
+                widget.insert("end", f"\n      tracking {self._minutes(tracked)}", ("muted",))
+
+        # Tracking reale misurato dall'Helper (≥ 0.8.47): storico per oggetto, poi totale
         by_name: dict[str, int] = {}
         for s in steps:
             name = str(s.get("name"))
             by_name[name] = by_name.get(name, 0) + int(s.get("trackedMs") or 0)
         total = sum(by_name.values())
         if total >= 60_000:
-            out.append("Tracking reale (somma dei passi):")
-            out.extend(f"   {name} · {self._minutes(ms)}" for name, ms in by_name.items())
-            out.append(f"   Totale piano {self._minutes(total)}")
+            self._plan_helper_section(widget, "Storico tracking")
+            for name, ms in by_name.items():
+                widget.insert("end", "\n")
+                widget.insert("end", name, ("bold",))
+                widget.insert("end", "  ·  ")
+                widget.insert("end", self._minutes(ms), ("accent",))
+            widget.insert("end", "\n\n")
+            widget.insert("end", "Totale piano ", ("head",))
+            widget.insert("end", self._minutes(total), ("green_b",))
         totals = plan.get("totals") or []
         if totals:
-            out.append("Tempo per oggetto:")
-            out.extend("   " + str(t) for t in totals)
-        self.plan_helper.set("\n".join(out))
+            self._plan_helper_planned(widget, totals)
+        self._plan_helper_end(widget)
         if plan.get("active"):
             self.plan_cancel_btn.pack(side="left", padx=(0, 6))
+
+    @staticmethod
+    def _plan_message_for_ui(msg: str, tel: dict | None) -> str:
+        """Ignora «stato non disponibile» se il telescopio risponde già nel remote.state."""
+        if not msg or msg.startswith("Errore su "):
+            return ""
+        if "non disponibile" in msg.lower() and tel and tel.get("reachable"):
+            return ""
+        return App._readable_plan_error(msg)
 
     @staticmethod
     def _readable_plan_error(text: str) -> str:
@@ -1988,10 +2287,7 @@ class App(tk.Tk):
     @staticmethod
     def _minutes(ms: int) -> str:
         """Durata come l'Helper: «40 min», «1h20»."""
-        m = round(ms / 60000)
-        if m < 60:
-            return f"{m} min"
-        return f"{m // 60}h" if m % 60 == 0 else f"{m // 60}h{m % 60:02d}"
+        return _minutes_ms(ms)
 
     @staticmethod
     def _fit_text(text: tk.Text, limit: int) -> None:
@@ -2007,6 +2303,7 @@ class App(tk.Tk):
     def open_favorite(self, r) -> None:
         if self._obs_busy:
             return
+        self._select_tgt_sub(1)
         self.obs_query.set(r.name)
         self._clear_observe()
         hit = sky.Hit(r.name, r.type_code, r.ra_deg, r.dec_deg)
@@ -2287,6 +2584,33 @@ class App(tk.Tk):
                                          separators=(",", ":"))
         self.cmd(line, wait=150 if action in {"init", "resume"} else 45)
 
+    def _ask_init_after_plan(self) -> None:
+        """Piano caricato e telescopio non ancora inizializzato: propone l'Init."""
+        tel = (self.state or {}).get("telescope") or {}
+        if not tel_actions_allowed(tel).get("init"):
+            return
+        if not messagebox.askyesno(
+            "Inizializzare il telescopio?",
+            "Il piano è caricato ma il telescopio non è ancora inizializzato.\n\n"
+            "Init: apertura braccio, calibrazione e puntamento iniziale. Farlo adesso?",
+            parent=self,
+        ):
+            return
+        line = "cmd|telescope|init"
+        site = self._site()
+        if site:
+            line += "|" + json.dumps({"lat": round(site[0], 6), "lon": round(site[1], 6)},
+                                     separators=(",", ":"))
+
+        def send() -> None:
+            # l'aggiornamento di stato dopo il piano può essere ancora in corso
+            if self._busy:
+                self.after(500, send)
+            else:
+                self.cmd(line, wait=150)
+
+        send()
+
     def motor_move(self) -> None:
         """Muove AZ o ALT nel modo scelto: relativo (± gradi) o assoluto (cmd|telescope|motor)."""
         axis = self.motor_axis.get()
@@ -2496,7 +2820,7 @@ class App(tk.Tk):
                     msg = f"Piano non caricato: {ack} (aggiorna Vespera Helper ≥ 0.8.23)"
                 else:
                     msg = f"Piano non caricato: {ack}"
-                self.queue.put(("plan_sent", msg))
+                self.queue.put(("plan_sent", msg, kind == "ok"))
             if line.startswith("cmd|telescope|observe"):
                 done = getattr(self, "_obs_pending", "")
                 self.queue.put(("obs_done", done if kind == "ok" else f"Osservazione non partita: {ack}"))
@@ -2572,7 +2896,7 @@ class App(tk.Tk):
 
     def _apply_state(self, state: dict) -> None:
         self.state = state or {}
-        if hasattr(self, "plan_helper"):
+        if getattr(self, "plan_helper_text", None) is not None:
             self._show_helper_plan(self.state)
         wifi = self.state.get("wifi") or {}
         tel = self.state.get("telescope") or {}
@@ -2956,7 +3280,9 @@ class App(tk.Tk):
                 elif kind == "plans_bot":
                     self._on_plans_bot(item[1], item[2])
                 elif kind == "plan_sent":
-                    self.plan_helper.set(item[1])
+                    self._set_plan_helper(item[1])
+                    if item[2]:
+                        self.after(300, self._ask_init_after_plan)
                 elif kind == "site_found":
                     self._set_site(item[1], item[2], item[3])
                 elif kind == "update":

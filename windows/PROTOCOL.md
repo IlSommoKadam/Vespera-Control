@@ -57,7 +57,11 @@ Stato in `remote.state.json` → `cable`: `{turnsDeg, turns, auto, busy, activit
 
 ### Set e riposizionamento a fine osservazione (Helper ≥ 0.8.49)
 
-`cmd|cable|set` (alias `zero`): con il cavo dritto, l'AZ attuale diventa il riferimento (`refAz`) e il conteggio riparte da 0. All'avvio di un'osservazione (OBS_STARTED/RESUMED) l'Helper salva AZ/ALT/cavo e li manda su Telegram. Alla fine (OBS_STOPPED/FINISHED), dopo 3 min e se nessun passo del piano parte entro 30 min, manda «inizio riposizionamento», ruota l'azimut di `−turnsDeg` (torna al Set) e manda lo stato finale: AZ, ALT, braccio, scarto dal Set, cavo srotolato o no. Di giorno a braccio chiuso fa lo stesso (una volta al giorno). `cmd|cable|auto|off` disattiva entrambi.
+`cmd|cable|set` (alias `zero`): con il cavo dritto, l'AZ attuale diventa il riferimento (`refAz`) e il conteggio riparte da 0. All'avvio di un'osservazione (OBS_STARTED/RESUMED) l'Helper salva AZ/ALT/cavo e li manda su Telegram. Alla fine (OBS_STOPPED/FINISHED), dopo 3 min e se nessun passo del piano parte entro 30 min, manda «inizio riposizionamento», ruota l'azimut di `−turnsDeg` (torna al Set) e manda lo stato finale: AZ, ALT, braccio, scarto dal Set, cavo srotolato o no. Di giorno a braccio chiuso fa lo stesso (una volta al giorno). Prima dello spegnimento mattutino/manuale (dopo park, Helper ≥ 0.8.53) riposiziona subito al Set e notifica su Telegram, così non si perde il ciclo nel ritardo di 3 min. `cmd|cable|auto|off` disattiva entrambi. La sync foto forzata (mattina / pre-spegnimento / Sync ora) manda anche «sync foto completata» su Telegram.
+
+### Catene di comandi riprendibili (Helper ≥ 0.8.54)
+
+Le sequenze programmate (spegnimento mattina/sole/manuale: sync → park → riposiziona → shutdown → Pi; weather protection: stop → park → wait closed → shutdown; riposizionamento AZ a passi) persistono lo step corrente. Su hangup / `connection abort` ritentano il passo (attesa rete ~2 min, max 3 volte) e al riconnect Vespera riprendono dal passo interrotto. La finestra mattutina non chiude il giorno finché resta una catena di spegnimento pending. Dopo 3 fallimenti del riposizionamento pre-spegnimento si passa comunque allo shutdown.
 
 Flag Telegram (Helper ≥ 0.8.51, in `set|telegram|{json}`): `reposition` accende i messaggi di riposizionamento al Set; `park` quelli di park avviato e concluso (braccio chiuso). `batteryOffMains` viene notificato anche alla connessione del Vespera, se è già a batteria.
 
